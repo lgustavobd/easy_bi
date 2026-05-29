@@ -8,7 +8,7 @@ import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
 import { ArrowLeft, BarChart3, CheckCircle2, Database, Edit3, Eye, Grid3X3, LayoutTemplate, LineChart, Loader2, Lock, PieChart, Plus, Save, Send, Table2, Trash2, TrendingUp, Unlock, X } from 'lucide-react';
 import { api } from '../../api/resources.api';
-import { ChartRenderer, FilterRule } from '../../components/dashboard/ChartRenderer';
+import { ChartRenderer, FilterRule, TableColumnFormatConfig } from '../../components/dashboard/ChartRenderer';
 import { DashboardFilterBar } from '../../components/dashboard/DashboardFilterBar';
 import { useAuthStore } from '../../store/auth.store';
 
@@ -25,6 +25,7 @@ type WidgetState = {
   metricColumn: string;
   dimensionColumn: string;
   tableColumns: string[];
+  tableColumnFormats: TableColumnFormatConfig;
   aggregation: Aggregation;
   showLegend: boolean;
   valueFormat: 'auto' | 'number' | 'currency' | 'percentage' | 'integer';
@@ -38,6 +39,17 @@ type WidgetState = {
   frame?: string;
   locked: boolean;
 };
+
+const tableFormatOptions = [
+  { value: 'auto', label: 'Automatico' },
+  { value: 'number', label: 'Numero decimal' },
+  { value: 'integer', label: 'Inteiro' },
+  { value: 'currency', label: 'Moeda' },
+  { value: 'percentage', label: 'Percentual direto' },
+  { value: 'percentageDecimal', label: 'Percentual 0-1 -> 0-100%' }
+] as const;
+
+const currencyOptions = ['BRL', 'USD', 'EUR', 'GBP', 'ARS', 'CLP', 'MXN'];
 
 const aggregationOptions: Array<{ value: Aggregation; label: string; hint: string }> = [
   { value: 'SUM', label: 'Soma', hint: 'Totaliza valores numéricos' },
@@ -164,6 +176,15 @@ function metricColumns(dataset: any) {
   return metrics.length ? metrics : columns;
 }
 
+function isNumericColumn(column: any) {
+  return Boolean(column?.isMetric || ['NUMBER', 'CURRENCY', 'PERCENTAGE'].includes(String(column?.dataType || '').toUpperCase()));
+}
+
+function cleanTableColumnFormats(formats: TableColumnFormatConfig = {}, tableColumns: string[] = []) {
+  const allowed = new Set(tableColumns);
+  return Object.fromEntries(Object.entries(formats).filter(([column, config]) => allowed.has(column) && config && config.type && config.type !== 'auto'));
+}
+
 function dimensionColumns(dataset: any) {
   const columns = getColumns(dataset);
   const dimensions = columns.filter((column: any) => column.isDimension || ['TEXT', 'DATE', 'BOOLEAN'].includes(column.dataType));
@@ -193,6 +214,7 @@ function widgetFactory(type: WidgetType, partial: Partial<WidgetState> = {}): Wi
     metricColumn: partial.metricColumn || '',
     dimensionColumn: partial.dimensionColumn || '',
     tableColumns: partial.tableColumns || [],
+    tableColumnFormats: partial.tableColumnFormats || {},
     aggregation: partial.aggregation || 'SUM',
     showLegend: partial.showLegend ?? (type !== 'KPI' && type !== 'TABLE'),
     valueFormat: partial.valueFormat || 'auto',
@@ -218,6 +240,7 @@ function normalizeWidget(widget: any, dashboardDataset: any): WidgetState {
     metricColumn: widget.metricColumn || firstMetric(dashboardDataset),
     dimensionColumn: widget.dimensionColumn || firstDimension(dashboardDataset),
     tableColumns: Array.isArray(config.tableColumns) && config.tableColumns.length ? config.tableColumns : [widget.dimensionColumn || firstDimension(dashboardDataset), widget.metricColumn || firstMetric(dashboardDataset)].filter(Boolean),
+    tableColumnFormats: typeof config.tableColumnFormats === 'object' && config.tableColumnFormats ? config.tableColumnFormats : {},
     aggregation: widget.aggregation || 'SUM',
     showLegend: config.showLegend ?? (widget.type !== 'KPI' && widget.type !== 'TABLE'),
     valueFormat: config.valueFormat || config.format?.type || 'auto',
@@ -244,6 +267,7 @@ function widgetPayload(widget: WidgetState, datasetId: string) {
     config: {
       showLegend: widget.showLegend,
       tableColumns: widget.type === 'TABLE' ? (widget.tableColumns?.length ? widget.tableColumns : [widget.dimensionColumn, widget.metricColumn].filter(Boolean)) : undefined,
+      tableColumnFormats: widget.type === 'TABLE' ? cleanTableColumnFormats(widget.tableColumnFormats, widget.tableColumns) : undefined,
       valueFormat: widget.valueFormat,
       valuePrefix: widget.valuePrefix,
       valueSuffix: widget.valueSuffix,
@@ -315,7 +339,7 @@ function WidgetCard({ widget, filters, onEdit, onRemove, onSelect, onToggleLock,
         </div>
       </div>
       <div className="h-[calc(100%-58px)] p-4">
-        <ChartRenderer type={widget.type} metric={widget.metricColumn} dimension={widget.dimensionColumn} showLegend={widget.showLegend} formatConfig={{ type: widget.valueFormat, prefix: widget.valuePrefix, suffix: widget.valueSuffix, decimals: widget.valueDecimals }} data={data} loading={isFetching} />
+        <ChartRenderer type={widget.type} metric={widget.metricColumn} dimension={widget.dimensionColumn} showLegend={widget.showLegend} formatConfig={{ type: widget.valueFormat, prefix: widget.valuePrefix, suffix: widget.valueSuffix, decimals: widget.valueDecimals }} tableColumnFormats={widget.tableColumnFormats} data={data} loading={isFetching} />
       </div>
       <div className="resize-helper">{widget.locked ? 'posição travada' : 'arraste a borda para redimensionar'}</div>
     </article>
@@ -327,6 +351,7 @@ function WidgetEditorModal({ widget, dataset, filters, onClose, onSave }: { widg
   const metrics = metricColumns(dataset);
   const dimensions = dimensionColumns(dataset);
   const tableSelectableColumns = getColumns(dataset);
+  const selectedNumericTableColumns = tableSelectableColumns.filter((column: any) => (draft.tableColumns || []).includes(column.name) && isNumericColumn(column));
   const selectedType = widgetCatalog.find((item) => item.type === draft.type) || widgetCatalog[1];
   const SelectedIcon = selectedType.icon;
   const { data: previewData, isFetching: previewLoading } = useQuery({
@@ -367,10 +392,28 @@ function WidgetEditorModal({ widget, dataset, filters, onClose, onSave }: { widg
   function toggleTableColumn(columnName: string) {
     setDraft((current) => {
       const currentColumns = current.tableColumns || [];
-      const tableColumns = currentColumns.includes(columnName)
+      const removing = currentColumns.includes(columnName);
+      const tableColumns = removing
         ? currentColumns.filter((column) => column !== columnName)
         : [...currentColumns, columnName];
-      return { ...current, tableColumns, datasetId: dataset?.id || current.datasetId };
+      const tableColumnFormats = { ...(current.tableColumnFormats || {}) };
+      if (removing) delete tableColumnFormats[columnName];
+      return { ...current, tableColumns, tableColumnFormats, datasetId: dataset?.id || current.datasetId };
+    });
+  }
+
+  function tableColumnFormat(columnName: string) {
+    return draft.tableColumnFormats?.[columnName] || { type: 'auto', decimals: 2, currency: 'BRL' };
+  }
+
+  function patchTableColumnFormat(columnName: string, payload: Record<string, any>) {
+    setDraft((current) => {
+      const previous = current.tableColumnFormats?.[columnName] || {};
+      const nextFormat = { type: 'auto', decimals: 2, currency: 'BRL', ...previous, ...payload };
+      const tableColumnFormats = { ...(current.tableColumnFormats || {}) };
+      if (!nextFormat.type || nextFormat.type === 'auto') delete tableColumnFormats[columnName];
+      else tableColumnFormats[columnName] = nextFormat;
+      return { ...current, tableColumnFormats, datasetId: dataset?.id || current.datasetId };
     });
   }
 
@@ -389,6 +432,7 @@ function WidgetEditorModal({ widget, dataset, filters, onClose, onSave }: { widg
       ...draft,
       datasetId: dataset?.id || draft.datasetId,
       tableColumns: draft.type === 'TABLE' ? (draft.tableColumns?.length ? draft.tableColumns : defaultTableColumns(dataset)) : draft.tableColumns,
+      tableColumnFormats: draft.type === 'TABLE' ? cleanTableColumnFormats(draft.tableColumnFormats, draft.tableColumns) : {},
       w: Math.min(12, Math.max(2, Number(draft.w) || 2)),
       h: Math.min(18, Math.max(3, Number(draft.h) || 3)),
       valueDecimals: Math.min(6, Math.max(0, Number(draft.valueDecimals) || 0))
@@ -423,7 +467,7 @@ function WidgetEditorModal({ widget, dataset, filters, onClose, onSave }: { widg
               {draft.locked && <span className="lock-badge"><Lock size={11} /> travado</span>}
             </div>
             <div className="h-[260px] p-4">
-              <ChartRenderer type={draft.type} metric={draft.metricColumn} dimension={draft.dimensionColumn} showLegend={draft.showLegend} formatConfig={{ type: draft.valueFormat, prefix: draft.valuePrefix, suffix: draft.valueSuffix, decimals: draft.valueDecimals }} data={previewData} loading={previewLoading} />
+              <ChartRenderer type={draft.type} metric={draft.metricColumn} dimension={draft.dimensionColumn} showLegend={draft.showLegend} formatConfig={{ type: draft.valueFormat, prefix: draft.valuePrefix, suffix: draft.valueSuffix, decimals: draft.valueDecimals }} tableColumnFormats={draft.tableColumnFormats} data={previewData} loading={previewLoading} />
             </div>
           </section>
 
@@ -469,6 +513,50 @@ function WidgetEditorModal({ widget, dataset, filters, onClose, onSave }: { widg
                     </div>
                   </div>
                   <p className="text-xs font-semibold text-slate-500">Selecione uma ou mais colunas para aparecerem na tabela.</p>
+                  <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <p className="font-black text-slate-950">Formato das colunas numericas</p>
+                        <p className="text-xs font-medium text-slate-500">A mascara muda apenas a exibicao da tabela. O dataset continua intacto.</p>
+                      </div>
+                      <span className="rounded-full bg-white px-3 py-1 text-xs font-black text-slate-500">{selectedNumericTableColumns.length} colunas</span>
+                    </div>
+                    {!selectedNumericTableColumns.length ? (
+                      <p className="mt-3 rounded-xl border border-dashed border-slate-200 bg-white p-3 text-xs font-bold text-slate-500">Selecione uma coluna numerica para configurar percentual, moeda ou decimais.</p>
+                    ) : (
+                      <div className="mt-3 grid gap-3">
+                        {selectedNumericTableColumns.map((column: any) => {
+                          const columnFormat = tableColumnFormat(column.name);
+                          const formatType = String(columnFormat.type || 'auto');
+                          return (
+                            <div key={column.id || column.name} className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-3 lg:grid-cols-[1.2fr_1fr_0.8fr_0.65fr]">
+                              <div className="min-w-0">
+                                <span className="form-label">Coluna</span>
+                                <p className="truncate text-sm font-black text-slate-900">{columnLabel(column)}</p>
+                              </div>
+                              <label className="space-y-1">
+                                <span className="form-label">Formato</span>
+                                <select value={formatType} onChange={(event) => patchTableColumnFormat(column.name, { type: event.target.value, decimals: event.target.value === 'integer' ? 0 : Number(columnFormat.decimals ?? 2) })} className="form-select">
+                                  {tableFormatOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                                </select>
+                              </label>
+                              <label className="space-y-1">
+                                <span className="form-label">Moeda</span>
+                                <input list="dashboard-currencies" value={String(columnFormat.currency || 'BRL')} disabled={formatType !== 'currency'} onChange={(event) => patchTableColumnFormat(column.name, { currency: event.target.value.toUpperCase() })} className="form-input disabled:bg-slate-100 disabled:text-slate-400" placeholder="BRL" />
+                              </label>
+                              <label className="space-y-1">
+                                <span className="form-label">Decimais</span>
+                                <input type="number" min={0} max={6} value={Number(columnFormat.decimals ?? 2)} disabled={formatType === 'auto' || formatType === 'integer'} onChange={(event) => patchTableColumnFormat(column.name, { decimals: Number(event.target.value) })} className="form-input disabled:bg-slate-100 disabled:text-slate-400" />
+                              </label>
+                            </div>
+                          );
+                        })}
+                        <datalist id="dashboard-currencies">
+                          {currencyOptions.map((currency) => <option key={currency} value={currency} />)}
+                        </datalist>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
               {draft.type !== 'TABLE' && <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
@@ -478,7 +566,7 @@ function WidgetEditorModal({ widget, dataset, filters, onClose, onSave }: { widg
               <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
                 <div>
                   <p className="font-black text-slate-950">Máscara do valor</p>
-                  <p className="text-xs font-medium text-slate-500">Defina como o número aparece no KPI, tooltip, legenda e tabela.</p>
+                  <p className="text-xs font-medium text-slate-500">Defina como o número aparece no KPI, tooltip e legenda. Tabelas podem ter formato por coluna acima.</p>
                 </div>
                 <div className="mt-3 grid gap-3 md:grid-cols-4">
                   <label className="space-y-1"><span className="form-label">Formato</span><select value={draft.valueFormat} onChange={(event) => patchDraft({ valueFormat: event.target.value as WidgetState['valueFormat'] })} className="form-select"><option value="auto">Automático</option><option value="currency">Moeda BRL</option><option value="number">Número</option><option value="integer">Inteiro</option><option value="percentage">Percentual</option></select></label>
@@ -575,7 +663,7 @@ export function DashboardBuilderPage() {
     const dataset = datasets.find((item: any) => item.id === datasetId);
     setSelectedDatasetId(datasetId);
     setFilters([]);
-    setWidgets((current) => current.map((widget) => ({ ...widget, datasetId, metricColumn: firstMetric(dataset), dimensionColumn: firstDimension(dataset), tableColumns: widget.type === 'TABLE' ? defaultTableColumns(dataset) : widget.tableColumns })));
+    setWidgets((current) => current.map((widget) => ({ ...widget, datasetId, metricColumn: firstMetric(dataset), dimensionColumn: firstDimension(dataset), tableColumns: widget.type === 'TABLE' ? defaultTableColumns(dataset) : widget.tableColumns, tableColumnFormats: {} })));
     setStatus('Dataset do dashboard alterado. Todos os gráficos foram apontados para esse dataset. Clique em Salvar para persistir.');
   }
 

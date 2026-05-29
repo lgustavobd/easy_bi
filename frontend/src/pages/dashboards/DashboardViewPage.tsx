@@ -41,6 +41,7 @@ function normalizeWidget(widget: any, dataset: any) {
     metricColumn: widget.metricColumn || firstMetric(dataset),
     dimensionColumn: widget.dimensionColumn || firstDimension(dataset),
     tableColumns: Array.isArray(config.tableColumns) && config.tableColumns.length ? config.tableColumns : defaultTableColumns(dataset),
+    tableColumnFormats: typeof config.tableColumnFormats === 'object' && config.tableColumnFormats ? config.tableColumnFormats : {},
     aggregation: widget.aggregation || 'SUM',
     showLegend: config.showLegend ?? (widget.type !== 'KPI' && widget.type !== 'TABLE'),
     valueFormat: config.valueFormat || config.format?.type || 'auto',
@@ -80,7 +81,7 @@ function WidgetView({ widget, filters }: { widget: any; filters: FilterRule[] })
         <span className="rounded-full bg-primary-soft px-2 py-1 text-[10px] font-bold text-primary">{widget.type}</span>
       </div>
       <div className="h-[calc(100%-62px)] p-4">
-        <ChartRenderer type={widget.type} metric={widget.metricColumn} dimension={widget.dimensionColumn} showLegend={widget.showLegend} formatConfig={{ type: widget.valueFormat, prefix: widget.valuePrefix, suffix: widget.valueSuffix, decimals: widget.valueDecimals }} data={data} loading={isFetching} />
+        <ChartRenderer type={widget.type} metric={widget.metricColumn} dimension={widget.dimensionColumn} showLegend={widget.showLegend} formatConfig={{ type: widget.valueFormat, prefix: widget.valuePrefix, suffix: widget.valueSuffix, decimals: widget.valueDecimals }} tableColumnFormats={widget.tableColumnFormats} data={data} loading={isFetching} />
       </div>
     </article>
   );

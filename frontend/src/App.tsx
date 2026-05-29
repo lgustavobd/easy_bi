@@ -17,7 +17,7 @@ import { TemplatesPage } from './pages/import-templates/TemplatesPage';
 import { ProfilePage } from './pages/profile/ProfilePage';
 import { AppearancePage } from './pages/settings/AppearancePage';
 
-const INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000;
+const INACTIVITY_TIMEOUT_MS = 60 * 60 * 1000;
 const ACTIVITY_EVENTS = ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart', 'wheel'] as const;
 
 function Protected({ children }: { children: JSX.Element }) {

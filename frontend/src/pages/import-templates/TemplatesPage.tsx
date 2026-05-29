@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Building2, CheckCircle2, ChevronLeft, ChevronRight, Database, Edit3, Eye, Layers3, Plus, RefreshCw, Save, Search, Sparkles, Table2, X } from 'lucide-react';
+import { AlertTriangle, Building2, ChevronLeft, ChevronRight, Database, Edit3, Eye, Layers3, Plus, RefreshCw, Save, Search, Sparkles, Table2, X } from 'lucide-react';
 import { api } from '../../api/resources.api';
 import { useAuthStore } from '../../store/auth.store';
 
@@ -1080,25 +1080,6 @@ export function TemplatesPage() {
         <div className="flex flex-wrap items-center gap-3">
           <div className="org-context-badge"><Building2 size={16} /><span>Organizacao</span><strong>{organization?.name || 'Global SaaS'}</strong></div>
           <span className="rounded-full bg-primary-soft px-4 py-2 text-xs font-black text-primary">{totalTemplates} modelos</span>
-        </div>
-      </div>
-
-      <div className="rounded-[1.75rem] border border-primary/10 bg-[linear-gradient(135deg,rgba(255,247,237,1),rgba(255,255,255,1))] p-5 shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="max-w-3xl">
-            <p className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-xs font-black uppercase tracking-[0.18em] text-primary shadow-sm">
-              <Sparkles size={14} />
-              Ajuste isolado de metricas
-            </p>
-            <h3 className="mt-4 text-2xl font-black text-slate-950">Uma area propria para evoluir os modelos sem mexer no restante do projeto.</h3>
-            <p className="mt-2 text-sm font-semibold leading-6 text-slate-600">Use o dataset escolhido como base para adicionar novos campos ao modelo. O sistema atualiza a lista de metricas e guarda o mapeamento desses campos para a proxima importacao.</p>
-          </div>
-          <div className="rounded-2xl border border-white/70 bg-white/90 p-4 text-sm font-semibold text-slate-600 shadow-sm">
-            <div className="flex items-start gap-3">
-              <CheckCircle2 className="mt-0.5 shrink-0 text-emerald-500" size={18} />
-              <p>Edicao focada no modelo, sem alterar os dados vivos do dataset.</p>
-            </div>
-          </div>
         </div>
       </div>
 

@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, Building2, CheckCircle2, ChevronLeft, ChevronRight, Database, Download, Eye, FileSpreadsheet, FolderSync, PlusCircle, RefreshCw, Search, Table2, Trash2, UploadCloud, Wand2, X } from 'lucide-react';
+import { Building2, CheckCircle2, ChevronLeft, ChevronRight, Database, Download, Eye, FileSpreadsheet, FolderSync, PlusCircle, RefreshCw, Search, Table2, Trash2, UploadCloud, Wand2, X } from 'lucide-react';
 import { api } from '../../api/resources.api';
 import { useAuthStore } from '../../store/auth.store';
 
 type DatasetTab = 'new' | 'update' | 'append' | 'patch';
+type DatasetScreen = 'list' | 'load';
 
 const typeLabel: Record<string, string> = {
   TEXT: 'Texto', NUMBER: 'Número', DATE: 'Data', BOOLEAN: 'Booleano', CURRENCY: 'Moeda', PERCENTAGE: 'Percentual'
@@ -176,6 +177,7 @@ export function DatasetUploadPage() {
   const user = useAuthStore(s => s.user);
   const organization = useAuthStore(s => s.organization);
   const allowed = canManageDataset(user, organization);
+  const [screen, setScreen] = useState<DatasetScreen>('list');
   const [tab, setTab] = useState<DatasetTab>('new');
   const [file, setFile] = useState<File | null>(null);
   const [templateId, setTemplateId] = useState('');
@@ -311,6 +313,7 @@ export function DatasetUploadPage() {
   }
 
   function switchToUpdate(dataset?: any) {
+    setScreen('load');
     setTab('update');
     setError('');
     setMessage('');
@@ -318,6 +321,7 @@ export function DatasetUploadPage() {
   }
 
   function switchToAppend(dataset?: any) {
+    setScreen('load');
     setTab('append');
     setError('');
     setMessage('');
@@ -325,6 +329,7 @@ export function DatasetUploadPage() {
   }
 
   function switchToPatch(dataset?: any) {
+    setScreen('load');
     setTab('patch');
     setError('');
     setMessage('');
@@ -488,6 +493,27 @@ export function DatasetUploadPage() {
         <OrgBadge organization={organization} />
       </div>
 
+      <section className="grid gap-3 md:grid-cols-2">
+        <button type="button" onClick={() => setScreen('list')} className={`rounded-[1.5rem] border p-5 text-left transition ${screen === 'list' ? 'border-primary bg-primary-soft shadow-sm' : 'border-slate-200 bg-white hover:border-primary/40 hover:bg-primary-soft/40'}`}>
+          <div className="flex items-center gap-3">
+            <div className={`rounded-2xl p-3 ${screen === 'list' ? 'bg-primary text-white' : 'bg-slate-100 text-slate-600'}`}><Database size={20} /></div>
+            <div>
+              <p className="font-black text-slate-950">Ver datasets</p>
+              <p className="mt-1 text-xs font-bold text-slate-500">Listagem, busca, lupa, modelo e ações rápidas.</p>
+            </div>
+          </div>
+        </button>
+        <button type="button" onClick={() => setScreen('load')} className={`rounded-[1.5rem] border p-5 text-left transition ${screen === 'load' ? 'border-primary bg-primary-soft shadow-sm' : 'border-slate-200 bg-white hover:border-primary/40 hover:bg-primary-soft/40'}`}>
+          <div className="flex items-center gap-3">
+            <div className={`rounded-2xl p-3 ${screen === 'load' ? 'bg-primary text-white' : 'bg-slate-100 text-slate-600'}`}><FolderSync size={20} /></div>
+            <div>
+              <p className="font-black text-slate-950">Atualizar dados</p>
+              <p className="mt-1 text-xs font-bold text-slate-500">Criar, substituir, incluir linhas ou atualizar por chave.</p>
+            </div>
+          </div>
+        </button>
+      </section>
+
       {(message || error || nameExists) && (
         <div className={`rounded-2xl border px-4 py-3 text-sm font-bold ${error || nameExists ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
           {error || (nameExists ? (
@@ -498,7 +524,7 @@ export function DatasetUploadPage() {
         </div>
       )}
 
-      <section className="dataset-imported-panel min-w-0 space-y-4">
+      {screen === 'list' && <section className="dataset-imported-panel min-w-0 space-y-4">
         <div className="card-premium min-w-0 p-5">
           <div className="dataset-list-header">
             <div className="flex items-center gap-3"><h3 className="text-sm font-black uppercase tracking-[0.15em] text-slate-500">Datasets importados</h3><span className="rounded-full bg-primary-soft px-3 py-1 text-xs font-black text-primary">{filteredDatasets.length}/{datasets.length}</span></div>
@@ -530,15 +556,16 @@ export function DatasetUploadPage() {
             ))}
           </div>
         </div>
-      </section>
+      </section>}
 
+      {screen === 'load' && <>
       <div className="dataset-load-shell">
         <div className="dataset-load-heading">
           <div>
             <p className="text-xs font-black uppercase tracking-[0.18em] text-primary">Carga de dados</p>
             <h3 className="mt-1 text-xl font-black text-slate-950">Escolha como quer enviar ou atualizar os dados</h3>
           </div>
-          <p className="text-sm font-semibold text-slate-500">A listagem acima continua como ponto de consulta. Abaixo ficam apenas as ações de carga.</p>
+          <p className="text-sm font-semibold text-slate-500">Use os cards abaixo para escolher o tipo de carga. Para consultar a base, volte em Ver datasets.</p>
         </div>
 
         <div className="dataset-mode-grid">
@@ -695,8 +722,6 @@ export function DatasetUploadPage() {
           )}
         </section>
 
-        <div className="dataset-size-warning rounded-[1.5rem] border border-yellow-200 bg-yellow-50 p-5 text-sm font-bold text-yellow-900"><AlertTriangle className="mb-2" /> Para arquivos muito grandes, ajuste tambem em HML: timeout do proxy, disco disponivel e `max_allowed_packet` do MySQL.</div>
-
         <aside style={{ display: 'none' }} aria-hidden="true">
           <div className="card-premium min-w-0 p-5">
             <div className="flex items-center justify-between gap-3"><h3 className="text-sm font-black uppercase tracking-[0.15em] text-slate-500">Datasets importados</h3><span className="rounded-full bg-primary-soft px-3 py-1 text-xs font-black text-primary">{datasets.length}</span></div>
@@ -721,9 +746,9 @@ export function DatasetUploadPage() {
               ))}
             </div>
           </div>
-          <div className="rounded-[1.5rem] border border-yellow-200 bg-yellow-50 p-5 text-sm font-bold text-yellow-900"><AlertTriangle className="mb-2" /> Para arquivos muito grandes, ajuste também em HML: timeout do proxy, disco disponível e `max_allowed_packet` do MySQL.</div>
         </aside>
       </div>
+      </>}
 
       {previewDataset && <DatasetPreviewModal dataset={previewDataset} onClose={() => setPreviewDataset(null)} />}
     </div>

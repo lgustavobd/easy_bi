@@ -16,12 +16,16 @@ export type ChartDataResult = {
   totalRows?: number;
 };
 
-type ValueFormatConfig = {
-  type?: 'auto' | 'number' | 'currency' | 'percentage' | 'integer' | string;
+export type ValueFormatConfig = {
+  type?: 'auto' | 'number' | 'currency' | 'percentage' | 'percentageDecimal' | 'integer' | string;
   prefix?: string;
   suffix?: string;
   decimals?: number;
+  currency?: string;
+  scale?: number;
 };
+
+export type TableColumnFormatConfig = Record<string, ValueFormatConfig | undefined>;
 
 type ChartRendererProps = {
   type: string;
@@ -29,6 +33,7 @@ type ChartRendererProps = {
   dimension?: string;
   showLegend?: boolean;
   formatConfig?: ValueFormatConfig;
+  tableColumnFormats?: TableColumnFormatConfig;
   data?: ChartDataResult;
   loading?: boolean;
   emptyMessage?: string;
@@ -44,15 +49,23 @@ function prettify(value?: string) {
 }
 
 function formatValue(metric: string | undefined, value: number, config?: ValueFormatConfig) {
-  const numeric = Number(value || 0);
+  const scale = typeof config?.scale === 'number' && Number.isFinite(config.scale) ? config.scale : 1;
+  const numeric = Number(value || 0) * scale;
   const formatType = String(config?.type || 'auto');
   const decimals = Math.max(0, Math.min(Number(config?.decimals ?? 2), 6));
+  const currency = String(config?.currency || 'BRL').trim().toUpperCase() || 'BRL';
   let formatted = '';
 
   if (formatType === 'currency') {
-    formatted = numeric.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: decimals });
+    try {
+      formatted = numeric.toLocaleString('pt-BR', { style: 'currency', currency, minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+    } catch {
+      formatted = `${currency} ${numeric.toLocaleString('pt-BR', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}`;
+    }
   } else if (formatType === 'percentage') {
     formatted = `${numeric.toLocaleString('pt-BR', { maximumFractionDigits: decimals })}%`;
+  } else if (formatType === 'percentageDecimal') {
+    formatted = `${(numeric * 100).toLocaleString('pt-BR', { maximumFractionDigits: decimals })}%`;
   } else if (formatType === 'integer') {
     formatted = numeric.toLocaleString('pt-BR', { maximumFractionDigits: 0 });
   } else if (formatType === 'number') {
@@ -71,8 +84,13 @@ function formatValue(metric: string | undefined, value: number, config?: ValueFo
   return `${config?.prefix || ''}${formatted}${config?.suffix || ''}`;
 }
 
-function formatCell(value: any) {
+function formatCell(value: any, columnName?: string, tableColumnFormats?: TableColumnFormatConfig) {
   if (value === null || value === undefined || value === '') return '-';
+  const columnFormat = columnName ? tableColumnFormats?.[columnName] : undefined;
+  if (columnFormat && columnFormat.type && columnFormat.type !== 'auto') {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) return formatValue(columnName, numeric, columnFormat);
+  }
   if (typeof value === 'number') return value.toLocaleString('pt-BR', { maximumFractionDigits: 2 });
   return String(value);
 }
@@ -96,7 +114,7 @@ function EmptyState({ message }: { message: string }) {
   );
 }
 
-export function ChartRenderer({ type, metric, dimension, showLegend = true, formatConfig, data, loading, emptyMessage }: ChartRendererProps) {
+export function ChartRenderer({ type, metric, dimension, showLegend = true, formatConfig, tableColumnFormats, data, loading, emptyMessage }: ChartRendererProps) {
   if (loading) return <Skeleton />;
 
   const rows = data?.rows || [];
@@ -163,7 +181,7 @@ export function ChartRenderer({ type, metric, dimension, showLegend = true, form
             <tbody>
               {rows.map((row, index) => (
                 <tr key={index} className="border-t border-slate-100 bg-white">
-                  {data.columns!.map((column) => <td key={column.name} className="whitespace-nowrap px-3 py-2 font-semibold text-slate-700">{formatCell(row[column.name])}</td>)}
+                  {data.columns!.map((column) => <td key={column.name} className="whitespace-nowrap px-3 py-2 font-semibold text-slate-700">{formatCell(row[column.name], column.name, tableColumnFormats)}</td>)}
                 </tr>
               ))}
             </tbody>

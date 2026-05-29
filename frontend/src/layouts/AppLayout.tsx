@@ -89,7 +89,7 @@ export function AppLayout() {
                 <p className="text-sm font-black text-slate-950">{organization?.name || 'Administracao global'}</p>
                 <p className="mt-1 text-xs font-semibold text-slate-500">{user?.name} - {user?.email}</p>
               </div>
-              <button onClick={() => { logout(); navigate('/login'); }} className="rounded-2xl border border-slate-200 p-3 text-slate-500 hover:border-primary/30 hover:text-primary"><LogOut size={18} /></button>
+              <button onClick={() => { logout(); navigate('/login'); }} className="rounded-2xl border border-red-200 bg-red-50 p-3 text-red-600 hover:border-red-300 hover:bg-red-100 hover:text-red-700"><LogOut size={18} /></button>
             </div>
           </header>
           <section className="flex-1 overflow-auto p-6"><Outlet /></section>
