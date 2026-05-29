@@ -9,11 +9,17 @@ import { FileParserService } from './services/file-parser.service';
 
 const ROW_INSERT_CHUNK_SIZE = Number(process.env.DATASET_INSERT_CHUNK_SIZE || 2000);
 const CALCULATED_COLUMN_FLAG = 'calculatedMetric';
+const DATE_DERIVED_COLUMN_FLAG = 'dateDerivedColumn';
 
 type CalculatedMetricRule = {
   name: string;
   label?: string;
   formula: string;
+};
+
+type DateDerivedColumnInfo = {
+  sourceColumn: string;
+  grain: 'month' | 'year';
 };
 
 @Injectable()
@@ -43,8 +49,10 @@ export class DatasetsService {
 
       const template = options?.templateId ? await this.findTemplate(options.templateId, organizationId) : null;
       const calculatedMetrics = this.getCalculatedMetrics(template);
-      const normalizedRows = this.applyCalculatedMetrics(parsed.rows.map((row) => this.normalizeRow(row)), calculatedMetrics);
-      const columns = this.analyzeRows(normalizedRows, calculatedMetrics);
+      const normalizedRows = parsed.rows.map((row) => this.normalizeRow(row));
+      const rowsWithDateColumns = this.applyDateDerivedColumns(normalizedRows);
+      const rowsWithCalculations = this.applyCalculatedMetrics(rowsWithDateColumns, calculatedMetrics);
+      const columns = this.analyzeRows(rowsWithCalculations, calculatedMetrics);
 
       const dataset = await this.prisma.dataset.create({
         data: {
@@ -55,11 +63,11 @@ export class DatasetsService {
           originalFileName: file.originalname,
           fileType: parsed.fileType,
           storagePath: null,
-          rowCount: normalizedRows.length,
+          rowCount: rowsWithCalculations.length,
           status: 'READY',
           importTemplateId: options?.templateId || undefined,
           metadata: {
-            preview: normalizedRows.slice(0, 10),
+            preview: rowsWithCalculations.slice(0, 10),
             parser: parsed.metadata || {},
             inferredAt: new Date().toISOString(),
             columns: columns.length,
@@ -68,7 +76,7 @@ export class DatasetsService {
         }
       });
 
-      await this.saveColumnsAndRows(dataset.id, organizationId, columns, normalizedRows);
+      await this.saveColumnsAndRows(dataset.id, organizationId, columns, rowsWithCalculations);
 
       const datasetWithColumns = await this.prisma.dataset.findUnique({
         where: { id: dataset.id },
@@ -101,7 +109,7 @@ export class DatasetsService {
         action: 'dataset.uploaded',
         entity: 'dataset',
         entityId: dataset.id,
-        metadata: { file: file.originalname, rows: normalizedRows.length, columns: columns.length, parser: parsed.metadata || {}, templateId: createdTemplate?.id || options?.templateId, sectorId: sector.id }
+        metadata: { file: file.originalname, rows: rowsWithCalculations.length, columns: columns.length, parser: parsed.metadata || {}, templateId: createdTemplate?.id || options?.templateId, sectorId: sector.id }
       });
 
       return { ...datasetWithColumns, importTemplate: createdTemplate };
@@ -206,15 +214,34 @@ export class DatasetsService {
     if (!sectorIds.length) throw new NotFoundException('Dataset não encontrado.');
     const dataset = await this.prisma.dataset.findFirst({ where: { id, organizationId, deletedAt: null, ...(sectorIds.length ? { sectorId: { in: sectorIds } } : {}) } });
     if (!dataset) throw new NotFoundException('Dataset não encontrado.');
-    await this.prisma.dataset.update({ where: { id }, data: { deletedAt: new Date(), status: 'ARCHIVED' } });
-    await this.audit.register({ organizationId, userId: user.id, action: 'dataset.deleted', entity: 'dataset', entityId: id });
+    const deletedAt = new Date();
+    let deletedTemplateId: string | null = null;
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.dataset.update({ where: { id }, data: { deletedAt, status: 'ARCHIVED' } });
+
+      if (dataset.importTemplateId) {
+        const linkedDatasets = await tx.dataset.count({
+          where: { organizationId, deletedAt: null, importTemplateId: dataset.importTemplateId, id: { not: id } }
+        });
+        if (!linkedDatasets) {
+          await tx.importTemplate.updateMany({
+            where: { id: dataset.importTemplateId, organizationId, deletedAt: null },
+            data: { deletedAt }
+          });
+          deletedTemplateId = dataset.importTemplateId;
+        }
+      }
+    });
+
+    await this.audit.register({ organizationId, userId: user.id, action: 'dataset.deleted', entity: 'dataset', entityId: id, metadata: { importTemplateId: deletedTemplateId } });
     return { success: true };
   }
 
   async templateCsv(id: string, organizationId: string, user?: any) {
     const dataset = await this.get(id, organizationId, user);
     const headers = dataset.columns
-      .filter((column) => !this.isCalculatedColumn(column))
+      .filter((column) => !this.isSystemGeneratedColumn(column))
       .map((column) => this.escapeCsv(column.originalName || column.name))
       .join(';');
     return `\ufeff${headers}\n`;
@@ -230,12 +257,13 @@ export class DatasetsService {
 
       const template = dataset.importTemplateId ? await this.findTemplate(dataset.importTemplateId, organizationId) : null;
       const calculatedMetrics = this.getCalculatedMetrics(template);
-      const calculatedColumnNames = new Set([
+      const generatedColumnNames = new Set([
         ...calculatedMetrics.map((metric) => metric.name),
-        ...dataset.columns.filter((column: any) => this.isCalculatedColumn(column)).map((column: any) => column.name)
+        ...dataset.columns.filter((column: any) => this.isSystemGeneratedColumn(column)).map((column: any) => column.name)
       ]);
+      const existingDateDerivedSources = this.dateDerivedSourceColumns(dataset.columns);
       const normalizedRows = parsed.rows.map((row) => this.normalizeRow(row));
-      const expectedColumns = dataset.columns.map((column) => column.name).filter((column) => !calculatedColumnNames.has(column));
+      const expectedColumns = dataset.columns.map((column) => column.name).filter((column) => !generatedColumnNames.has(column));
       const receivedColumns = Object.keys(normalizedRows[0] || {});
       const missing = expectedColumns.filter((column) => !receivedColumns.includes(column));
 
@@ -243,7 +271,8 @@ export class DatasetsService {
         throw new BadRequestException(`O arquivo não segue o modelo do dataset. Colunas ausentes: ${missing.join(', ')}`);
       }
 
-      const rowsWithCalculations = this.applyCalculatedMetrics(normalizedRows, calculatedMetrics);
+      const rowsWithDateColumns = this.applyDateDerivedColumns(normalizedRows, existingDateDerivedSources);
+      const rowsWithCalculations = this.applyCalculatedMetrics(rowsWithDateColumns, calculatedMetrics);
       const columns = this.analyzeRows(rowsWithCalculations, calculatedMetrics);
       await this.prisma.$transaction(async (tx) => {
         await tx.datasetRow.deleteMany({ where: { datasetId: id, organizationId } });
@@ -283,12 +312,13 @@ export class DatasetsService {
 
       const template = dataset.importTemplateId ? await this.findTemplate(dataset.importTemplateId, organizationId) : null;
       const calculatedMetrics = this.getCalculatedMetrics(template);
-      const calculatedColumnNames = new Set([
+      const generatedColumnNames = new Set([
         ...calculatedMetrics.map((metric) => metric.name),
-        ...dataset.columns.filter((column: any) => this.isCalculatedColumn(column)).map((column: any) => column.name)
+        ...dataset.columns.filter((column: any) => this.isSystemGeneratedColumn(column)).map((column: any) => column.name)
       ]);
+      const existingDateDerivedSources = this.dateDerivedSourceColumns(dataset.columns);
       const normalizedRows = parsed.rows.map((row) => this.normalizeRow(row));
-      const expectedColumns = dataset.columns.map((column) => column.name).filter((column) => !calculatedColumnNames.has(column));
+      const expectedColumns = dataset.columns.map((column) => column.name).filter((column) => !generatedColumnNames.has(column));
       const receivedColumns = Object.keys(normalizedRows[0] || {});
       const missing = expectedColumns.filter((column) => !receivedColumns.includes(column));
 
@@ -297,7 +327,8 @@ export class DatasetsService {
       }
 
       const existingCalculatedColumns = dataset.columns.filter((column: any) => this.isCalculatedColumn(column)).map((column: any) => column.name);
-      const rowsWithCalculations = normalizedRows.map((row) => this.applyCalculatedMetricsToRow(row, calculatedMetrics, existingCalculatedColumns));
+      const rowsWithDateColumns = this.applyDateDerivedColumns(normalizedRows, existingDateDerivedSources);
+      const rowsWithCalculations = rowsWithDateColumns.map((row) => this.applyCalculatedMetricsToRow(row, calculatedMetrics, existingCalculatedColumns));
       const [rowIndexAggregate, currentRowCount] = await Promise.all([
         this.prisma.datasetRow.aggregate({
           where: { datasetId: id, organizationId },
@@ -369,11 +400,11 @@ export class DatasetsService {
 
     const template = dataset.importTemplateId ? await this.findTemplate(dataset.importTemplateId, organizationId) : null;
     const calculatedMetrics = this.getCalculatedMetrics(template);
-    const calculatedColumnNames = new Set([
+    const generatedColumnNames = new Set([
       ...calculatedMetrics.map((metric) => metric.name),
-      ...dataset.columns.filter((column: any) => this.isCalculatedColumn(column)).map((column: any) => column.name)
+      ...dataset.columns.filter((column: any) => this.isSystemGeneratedColumn(column)).map((column: any) => column.name)
     ]);
-    const editableColumns = dataset.columns.filter((column: any) => !calculatedColumnNames.has(column.name));
+    const editableColumns = dataset.columns.filter((column: any) => !generatedColumnNames.has(column.name));
     const editableColumnNames = new Set(editableColumns.map((column: any) => column.name));
 
     if (!editableColumnNames.has(normalizedMatchColumn)) {
@@ -426,6 +457,8 @@ export class DatasetsService {
 
       const unmatchedKeys = new Set(patchesByKey.keys());
       const existingCalculatedColumns = dataset.columns.filter((column: any) => this.isCalculatedColumn(column)).map((column: any) => column.name);
+      const existingDateDerivedColumns = dataset.columns.filter((column: any) => this.isDateDerivedColumn(column)).map((column: any) => column.name);
+      const existingDateDerivedSources = this.dateDerivedSourceColumns(dataset.columns);
       let scannedRows = 0;
       let matchedRows = 0;
       let updatedRows = 0;
@@ -450,7 +483,8 @@ export class DatasetsService {
 
           matchedRows += 1;
           unmatchedKeys.delete(matchValue);
-          const nextData = this.applyCalculatedMetricsToRow({ ...currentData, ...patch }, calculatedMetrics, existingCalculatedColumns);
+          const nextBase = this.applyDateDerivedColumnsToRow(this.removeColumns({ ...currentData, ...patch }, existingDateDerivedColumns), existingDateDerivedSources);
+          const nextData = this.applyCalculatedMetricsToRow(nextBase, calculatedMetrics, existingCalculatedColumns);
           await this.prisma.datasetRow.update({ where: { id: row.id }, data: { data: nextData as any } });
           updatedRows += 1;
         }
@@ -510,7 +544,11 @@ export class DatasetsService {
     const template = dataset.importTemplateId ? await this.findTemplate(dataset.importTemplateId, organizationId) : null;
     const calculatedMetrics = this.getCalculatedMetrics(template);
     const existingCalculatedColumns = dataset.columns.filter((column: any) => this.isCalculatedColumn(column)).map((column: any) => column.name);
-    const rows = dataset.rows.map((row) => this.applyCalculatedMetricsToRow(row.data as Record<string, any>, calculatedMetrics, existingCalculatedColumns));
+    const existingDateDerivedColumns = dataset.columns.filter((column: any) => this.isDateDerivedColumn(column)).map((column: any) => column.name);
+    const existingDateDerivedSources = this.dateDerivedSourceColumns(dataset.columns);
+    const baseRows = dataset.rows.map((row) => this.removeColumns(row.data as Record<string, any>, existingDateDerivedColumns));
+    const rowsWithDateColumns = this.applyDateDerivedColumns(baseRows, existingDateDerivedSources);
+    const rows = rowsWithDateColumns.map((row) => this.applyCalculatedMetricsToRow(row, calculatedMetrics, existingCalculatedColumns));
     const columns = this.analyzeRows(rows, calculatedMetrics);
     for (const [index, row] of dataset.rows.entries()) {
       await this.prisma.datasetRow.update({ where: { id: row.id }, data: { data: rows[index] as any } });
@@ -610,8 +648,27 @@ export class DatasetsService {
 
   private analyzeRows(rows: Record<string, any>[], calculatedMetrics: CalculatedMetricRule[]) {
     const calculatedByName = new Map(calculatedMetrics.map((metric) => [metric.name, metric]));
+    const rowColumns = new Set(rows.flatMap((row) => Object.keys(row)));
     return this.analyzer.analyze(rows).map((column) => {
       const calculatedMetric = calculatedByName.get(column.name);
+      const dateDerived = this.dateDerivedColumnInfo(column.name);
+      if (dateDerived && rowColumns.has(dateDerived.sourceColumn) && this.isGeneratedDateDerivedColumn(rows, column.name, dateDerived)) {
+        return {
+          ...column,
+          dataType: 'TEXT',
+          semanticType: 'TIME_DIMENSION',
+          isMetric: false,
+          isDimension: true,
+          isIdentifier: false,
+          confidence: 0.95,
+          formatConfig: {
+            ...(column.formatConfig || {}),
+            [DATE_DERIVED_COLUMN_FLAG]: true,
+            sourceColumn: dateDerived.sourceColumn,
+            grain: dateDerived.grain
+          }
+        };
+      }
       if (!calculatedMetric) return column;
 
       return {
@@ -629,6 +686,104 @@ export class DatasetsService {
         }
       };
     });
+  }
+
+  private applyDateDerivedColumns(rows: Record<string, any>[], preferredDateColumns: string[] = []) {
+    if (!rows.length) return rows;
+    const dateColumns = Array.from(new Set([...preferredDateColumns, ...this.detectDateColumns(rows)]));
+    if (!dateColumns.length) return rows;
+    return rows.map((row) => this.applyDateDerivedColumnsToRow(row, dateColumns));
+  }
+
+  private applyDateDerivedColumnsToRow(row: Record<string, any>, dateColumns?: string[]) {
+    const columns = dateColumns?.length ? dateColumns : this.detectDateColumns([row]);
+    if (!columns.length) return { ...row };
+    const output = { ...row };
+    columns.forEach((column) => {
+      const monthKey = this.dateDerivedKey(column, 'month');
+      const yearKey = this.dateDerivedKey(column, 'year');
+      const parts = this.parseDateParts(output[column]);
+      if (!(monthKey in output)) output[monthKey] = parts ? `${parts.year}-${String(parts.month).padStart(2, '0')}` : null;
+      if (!(yearKey in output)) output[yearKey] = parts ? String(parts.year) : null;
+    });
+    return output;
+  }
+
+  private detectDateColumns(rows: Record<string, any>[]) {
+    const sample = rows.slice(0, 200);
+    const columns = Array.from(new Set(sample.flatMap((row) => Object.keys(row))));
+    return columns.filter((column) => {
+      if (this.dateDerivedColumnInfo(column)) return false;
+      const values = sample
+        .map((row) => row[column])
+        .filter((value) => value !== null && value !== undefined && String(value).trim() !== '');
+      if (!values.length) return false;
+      const parsed = values.filter((value) => this.parseDateParts(value)).length;
+      return parsed / values.length >= 0.7;
+    });
+  }
+
+  private parseDateParts(value: any) {
+    if (value instanceof Date && !Number.isNaN(value.getTime())) {
+      return { year: value.getFullYear(), month: value.getMonth() + 1 };
+    }
+    if (typeof value === 'number') return null;
+    const text = String(value ?? '').trim();
+    if (!text) return null;
+    let match = text.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[T\s].*)?$/);
+    if (match) return this.validDateParts(Number(match[1]), Number(match[2]), Number(match[3]));
+    match = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s.*)?$/);
+    if (match) return this.validDateParts(Number(match[3]), Number(match[2]), Number(match[1]));
+    match = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2})(?:\s.*)?$/);
+    if (match) return this.validDateParts(this.expandShortYear(Number(match[3])), Number(match[2]), Number(match[1]));
+    if (!/^\d{4}.*\d{1,2}.*\d{1,2}/.test(text)) return null;
+    const date = new Date(text);
+    if (Number.isNaN(date.getTime())) return null;
+    return this.validDateParts(date.getFullYear(), date.getMonth() + 1, date.getDate());
+  }
+
+  private validDateParts(year: number, month: number, day: number) {
+    if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return null;
+    if (year < 1900 || year > 2200 || month < 1 || month > 12 || day < 1 || day > 31) return null;
+    const date = new Date(Date.UTC(year, month - 1, day));
+    if (date.getUTCFullYear() !== year || date.getUTCMonth() + 1 !== month || date.getUTCDate() !== day) return null;
+    return { year, month };
+  }
+
+  private expandShortYear(year: number) {
+    if (year >= 100) return year;
+    return year >= 70 ? 1900 + year : 2000 + year;
+  }
+
+  private dateDerivedKey(sourceColumn: string, grain: DateDerivedColumnInfo['grain']) {
+    return `${sourceColumn}_${grain === 'month' ? 'mes' : 'ano'}`;
+  }
+
+  private dateDerivedColumnInfo(column: string): DateDerivedColumnInfo | null {
+    if (column.endsWith('_mes')) return { sourceColumn: column.slice(0, -4), grain: 'month' };
+    if (column.endsWith('_ano')) return { sourceColumn: column.slice(0, -4), grain: 'year' };
+    return null;
+  }
+
+  private dateDerivedSourceColumns(columns: any[]) {
+    return Array.from(new Set(columns
+      .filter((column) => this.isDateDerivedColumn(column))
+      .map((column) => this.dateDerivedColumnInfo(column.name)?.sourceColumn)
+      .filter(Boolean))) as string[];
+  }
+
+  private isGeneratedDateDerivedColumn(rows: Record<string, any>[], column: string, info: DateDerivedColumnInfo) {
+    const checkedRows = rows
+      .slice(0, 200)
+      .filter((row) => row[column] !== null && row[column] !== undefined && String(row[column]).trim() !== '');
+    if (!checkedRows.length) return true;
+    const matches = checkedRows.filter((row) => {
+      const parts = this.parseDateParts(row[info.sourceColumn]);
+      if (!parts) return false;
+      const expected = info.grain === 'month' ? `${parts.year}-${String(parts.month).padStart(2, '0')}` : String(parts.year);
+      return String(row[column]) === expected;
+    }).length;
+    return matches / checkedRows.length >= 0.7;
   }
 
   private applyCalculatedMetrics(rows: Record<string, any>[], calculatedMetrics: CalculatedMetricRule[]) {
@@ -829,6 +984,12 @@ export class DatasetsService {
     if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
     let text = String(value ?? '').trim();
     if (!text) return 0;
+    const sign = text.startsWith('-') ? -1 : 1;
+    const durationText = text.replace(/^-/, '').toLowerCase().trim();
+    const hms = durationText.match(/^(\d{1,7}):([0-5]?\d)(?::([0-5]?\d))?$/);
+    if (hms) return sign * (Number(hms[1] || 0) + Number(hms[2] || 0) / 60 + Number(hms[3] || 0) / 3600);
+    const shortText = durationText.match(/^(\d+(?:[,.]\d+)?)\s*h\s*(\d{1,2})(?:\s*m)?$/);
+    if (shortText) return sign * (this.toNumber(shortText[1]) + Number(shortText[2] || 0) / 60);
     text = text.replace(/R\$|\s|%/g, '');
     if (text.includes(',') && text.includes('.')) text = text.replace(/\./g, '').replace(',', '.');
     else if (text.includes(',')) text = text.replace(',', '.');
@@ -840,8 +1001,22 @@ export class DatasetsService {
     return String(value ?? '').trim().toLowerCase();
   }
 
+  private removeColumns(row: Record<string, any>, columns: string[]) {
+    const output = { ...row };
+    columns.forEach((column) => delete output[column]);
+    return output;
+  }
+
   private isCalculatedColumn(column: any) {
     return Boolean((column?.formatConfig as any)?.[CALCULATED_COLUMN_FLAG]);
+  }
+
+  private isDateDerivedColumn(column: any) {
+    return Boolean((column?.formatConfig as any)?.[DATE_DERIVED_COLUMN_FLAG]);
+  }
+
+  private isSystemGeneratedColumn(column: any) {
+    return this.isCalculatedColumn(column) || this.isDateDerivedColumn(column);
   }
 
   private normalizeDatasetName(name: string) {

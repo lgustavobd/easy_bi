@@ -42,7 +42,7 @@ function normalizeWidget(widget: any, dataset: any) {
     dimensionColumn: widget.dimensionColumn || firstDimension(dataset),
     tableColumns: Array.isArray(config.tableColumns) && config.tableColumns.length ? config.tableColumns : defaultTableColumns(dataset),
     tableColumnFormats: typeof config.tableColumnFormats === 'object' && config.tableColumnFormats ? config.tableColumnFormats : {},
-    aggregation: widget.aggregation || 'SUM',
+    aggregation: config.aggregationMode || widget.aggregation || 'SUM',
     showLegend: config.showLegend ?? (widget.type !== 'KPI' && widget.type !== 'TABLE'),
     valueFormat: config.valueFormat || config.format?.type || 'auto',
     valuePrefix: config.valuePrefix || config.format?.prefix || '',

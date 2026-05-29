@@ -12,17 +12,20 @@ export type FilterRule = {
 export type ChartDataResult = {
   value?: number;
   rows?: Array<any>;
-  columns?: Array<{ name: string; label?: string }>;
+  columns?: Array<{ name: string; label?: string; dataType?: string; formatConfig?: ValueFormatConfig }>;
   totalRows?: number;
+  formatConfig?: ValueFormatConfig;
 };
 
 export type ValueFormatConfig = {
-  type?: 'auto' | 'number' | 'currency' | 'percentage' | 'percentageDecimal' | 'integer' | string;
+  type?: 'auto' | 'number' | 'currency' | 'percentage' | 'percentageDecimal' | 'integer' | 'duration' | 'dateBr' | 'dateTimeBr' | 'monthYear' | 'monthNameYear' | 'year' | string;
   prefix?: string;
   suffix?: string;
   decimals?: number;
   currency?: string;
   scale?: number;
+  durationUnit?: 'seconds' | string;
+  durationInput?: string;
 };
 
 export type TableColumnFormatConfig = Record<string, ValueFormatConfig | undefined>;
@@ -39,6 +42,8 @@ type ChartRendererProps = {
   emptyMessage?: string;
 };
 
+type TableColumnMeta = { name: string; label?: string; dataType?: string; formatConfig?: ValueFormatConfig };
+
 const palette = ['var(--easy-primary)', 'var(--easy-primary-2)', 'var(--easy-primary-3)', 'var(--easy-primary-light)', '#64748b', '#94a3b8', '#cbd5e1'];
 
 function prettify(value?: string) {
@@ -46,6 +51,82 @@ function prettify(value?: string) {
   return value
     .replace(/_/g, ' ')
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function formatDuration(totalSeconds: number) {
+  const sign = totalSeconds < 0 ? '-' : '';
+  const absolute = Math.abs(Math.round(Number(totalSeconds || 0)));
+  const hours = Math.floor(absolute / 3600);
+  const minutes = Math.floor((absolute % 3600) / 60);
+  const seconds = absolute % 60;
+  if (hours) return `${sign}${hours}h ${String(minutes).padStart(2, '0')}m${seconds ? ` ${String(seconds).padStart(2, '0')}s` : ''}`;
+  if (minutes) return `${sign}${minutes}m${seconds ? ` ${String(seconds).padStart(2, '0')}s` : ''}`;
+  return `${sign}${seconds}s`;
+}
+
+function parseDuration(value: any, input = 'duration_text') {
+  if (value === null || value === undefined || value === '') return Number.NaN;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) return Number.NaN;
+    if (input === 'minutes') return value * 60;
+    if (input === 'seconds') return value;
+    if (input === 'excel_day_fraction') return value * 86400;
+    return value * 3600;
+  }
+  const raw = String(value).trim();
+  if (!raw) return Number.NaN;
+  const sign = raw.startsWith('-') ? -1 : 1;
+  const text = raw.replace(/^-/, '').toLowerCase().trim();
+  const hms = text.match(/^(\d{1,7}):([0-5]?\d)(?::([0-5]?\d))?$/);
+  if (hms) return sign * (Number(hms[1] || 0) * 3600 + Number(hms[2] || 0) * 60 + Number(hms[3] || 0));
+  const shortText = text.match(/^(\d+(?:[,.]\d+)?)\s*h\s*(\d{1,2})(?:\s*m)?$/);
+  if (shortText) return sign * (Number(String(shortText[1]).replace(',', '.')) * 3600 + Number(shortText[2] || 0) * 60);
+  const numeric = Number(text.replace(/\.(?=\d{3}(\D|$))/g, '').replace(',', '.'));
+  if (!Number.isFinite(numeric)) return Number.NaN;
+  if (input === 'minutes') return sign * numeric * 60;
+  if (input === 'seconds') return sign * numeric;
+  if (input === 'excel_day_fraction') return sign * numeric * 86400;
+  return sign * numeric * 3600;
+}
+
+function isDateFormat(type?: string) {
+  return ['dateBr', 'dateTimeBr', 'monthYear', 'monthNameYear', 'year'].includes(String(type || ''));
+}
+
+function parseDateParts(value: any) {
+  const text = String(value ?? '').trim();
+  if (!text) return null;
+  let match = text.match(/^(\d{4})-(\d{1,2})(?:-(\d{1,2}))?(?:[T\s](\d{2}):(\d{2})(?::(\d{2}))?)?/);
+  if (match) return { year: Number(match[1]), month: Number(match[2]), day: Number(match[3] || 1), hour: match[4], minute: match[5] };
+  match = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{2}):(\d{2}))?/);
+  if (match) return { year: Number(match[3]), month: Number(match[2]), day: Number(match[1]), hour: match[4], minute: match[5] };
+  match = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2})(?:\s+(\d{2}):(\d{2}))?/);
+  if (match) return { year: expandShortYear(Number(match[3])), month: Number(match[2]), day: Number(match[1]), hour: match[4], minute: match[5] };
+  match = text.match(/^(\d{1,2})\/(\d{4})$/);
+  if (match) return { year: Number(match[2]), month: Number(match[1]), day: 1 };
+  match = text.match(/^(\d{4})$/);
+  if (match) return { year: Number(match[1]), month: 1, day: 1 };
+  return null;
+}
+
+function expandShortYear(year: number) {
+  if (year >= 100) return year;
+  return year >= 70 ? 1900 + year : 2000 + year;
+}
+
+function formatDateValue(value: any, type = 'dateBr') {
+  const parts = parseDateParts(value);
+  if (!parts) return String(value ?? '-');
+  const date = new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
+  const monthName = new Intl.DateTimeFormat('pt-BR', { month: 'short', timeZone: 'UTC' }).format(date).replace('.', '');
+  const day = String(parts.day).padStart(2, '0');
+  const month = String(parts.month).padStart(2, '0');
+  if (type === 'year') return String(parts.year);
+  if (type === 'monthYear') return `${month}/${parts.year}`;
+  if (type === 'monthNameYear') return `${monthName}/${parts.year}`;
+  const formattedDate = `${day}/${month}/${parts.year}`;
+  if (type === 'dateTimeBr' && parts.hour && parts.minute) return `${formattedDate} ${parts.hour}:${parts.minute}`;
+  return formattedDate;
 }
 
 function formatValue(metric: string | undefined, value: number, config?: ValueFormatConfig) {
@@ -56,7 +137,9 @@ function formatValue(metric: string | undefined, value: number, config?: ValueFo
   const currency = String(config?.currency || 'BRL').trim().toUpperCase() || 'BRL';
   let formatted = '';
 
-  if (formatType === 'currency') {
+  if (formatType === 'duration') {
+    formatted = formatDuration(numeric);
+  } else if (formatType === 'currency') {
     try {
       formatted = numeric.toLocaleString('pt-BR', { style: 'currency', currency, minimumFractionDigits: decimals, maximumFractionDigits: decimals });
     } catch {
@@ -84,12 +167,30 @@ function formatValue(metric: string | undefined, value: number, config?: ValueFo
   return `${config?.prefix || ''}${formatted}${config?.suffix || ''}`;
 }
 
-function formatCell(value: any, columnName?: string, tableColumnFormats?: TableColumnFormatConfig) {
+function formatAxisTick(metric: string | undefined, value: any, config?: ValueFormatConfig) {
+  const numeric = Number(value || 0);
+  if (!Number.isFinite(numeric)) return String(value ?? '');
+  if (config?.type && config.type !== 'auto') return formatValue(metric, numeric, config);
+  return numeric.toLocaleString('pt-BR', { maximumFractionDigits: 2 });
+}
+
+function defaultDateFormat(column?: TableColumnMeta): ValueFormatConfig | undefined {
+  const config = (column?.formatConfig || {}) as any;
+  const type = String(column?.dataType || '').toUpperCase();
+  if (config.dateDerivedColumn && config.grain === 'month') return { type: 'monthYear' };
+  if (config.dateDerivedColumn && config.grain === 'year') return { type: 'year' };
+  if (type === 'DATE') return { type: 'dateBr' };
+  return undefined;
+}
+
+function formatCell(value: any, column?: TableColumnMeta, tableColumnFormats?: TableColumnFormatConfig) {
   if (value === null || value === undefined || value === '') return '-';
-  const columnFormat = columnName ? tableColumnFormats?.[columnName] : undefined;
-  if (columnFormat && columnFormat.type && columnFormat.type !== 'auto') {
-    const numeric = Number(value);
-    if (Number.isFinite(numeric)) return formatValue(columnName, numeric, columnFormat);
+  const columnFormat = column?.name ? tableColumnFormats?.[column.name] : undefined;
+  const effectiveFormat = columnFormat && columnFormat.type && columnFormat.type !== 'auto' ? columnFormat : defaultDateFormat(column) || column?.formatConfig;
+  if (effectiveFormat && effectiveFormat.type && effectiveFormat.type !== 'auto') {
+    if (isDateFormat(effectiveFormat.type)) return formatDateValue(value, effectiveFormat.type);
+    const numeric = effectiveFormat.type === 'duration' ? parseDuration(value, effectiveFormat.durationInput) : Number(value);
+    if (Number.isFinite(numeric)) return formatValue(column?.name, numeric, effectiveFormat);
   }
   if (typeof value === 'number') return value.toLocaleString('pt-BR', { maximumFractionDigits: 2 });
   return String(value);
@@ -119,6 +220,7 @@ export function ChartRenderer({ type, metric, dimension, showLegend = true, form
 
   const rows = data?.rows || [];
   const total = Number(data?.value || rows.reduce((acc, item) => acc + Number(item.value || 0), 0));
+  const valueFormatConfig = formatConfig?.type && formatConfig.type !== 'auto' ? formatConfig : data?.formatConfig || formatConfig;
   const metricLabel = prettify(metric);
   const dimensionLabel = prettify(dimension);
 
@@ -130,7 +232,7 @@ export function ChartRenderer({ type, metric, dimension, showLegend = true, form
     return (
       <div className="flex h-full flex-col justify-center">
         <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">{metricLabel}</p>
-        <p className="mt-2 text-4xl font-black tracking-tight text-slate-950">{formatValue(metric, total, formatConfig)}</p>
+        <p className="mt-2 text-4xl font-black tracking-tight text-slate-950">{formatValue(metric, total, valueFormatConfig)}</p>
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <span className="rounded-full bg-primary-soft px-2.5 py-1 text-xs font-black text-primary">{(data?.totalRows || 0).toLocaleString('pt-BR')} linhas</span>
           <span className="text-xs font-semibold text-slate-400">calculado no banco da organização</span>
@@ -145,8 +247,8 @@ export function ChartRenderer({ type, metric, dimension, showLegend = true, form
         <LineChart data={rows} margin={{ top: 10, right: 12, bottom: 0, left: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
           <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#64748b' }} interval="preserveStartEnd" />
-          <YAxis tick={{ fontSize: 11, fill: '#64748b' }} />
-          <Tooltip formatter={(value: number) => formatValue(metric, value, formatConfig)} labelFormatter={(value) => `${dimensionLabel}: ${value}`} />
+          <YAxis tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={(value) => formatAxisTick(metric, value, valueFormatConfig)} />
+          <Tooltip formatter={(value: number) => formatValue(metric, value, valueFormatConfig)} labelFormatter={(value) => `${dimensionLabel}: ${value}`} />
           {showLegend && <Legend verticalAlign="bottom" height={26} />}
           <Line name={metricLabel} type="monotone" dataKey="value" stroke="var(--easy-primary)" strokeWidth={3} dot={{ r: 3 }} />
         </LineChart>
@@ -158,7 +260,7 @@ export function ChartRenderer({ type, metric, dimension, showLegend = true, form
     return (
       <ResponsiveContainer width="100%" height="100%">
         <PieChart>
-          <Tooltip formatter={(value: number) => formatValue(metric, value, formatConfig)} />
+          <Tooltip formatter={(value: number) => formatValue(metric, value, valueFormatConfig)} />
           {showLegend && <Legend verticalAlign="bottom" height={32} />}
           <Pie data={rows} dataKey="value" nameKey="name" innerRadius="50%" outerRadius="76%" paddingAngle={2}>
             {rows.map((_, index) => <Cell key={index} fill={palette[index % palette.length]} />)}
@@ -181,7 +283,7 @@ export function ChartRenderer({ type, metric, dimension, showLegend = true, form
             <tbody>
               {rows.map((row, index) => (
                 <tr key={index} className="border-t border-slate-100 bg-white">
-                  {data.columns!.map((column) => <td key={column.name} className="whitespace-nowrap px-3 py-2 font-semibold text-slate-700">{formatCell(row[column.name], column.name, tableColumnFormats)}</td>)}
+                  {data.columns!.map((column) => <td key={column.name} className="whitespace-nowrap px-3 py-2 font-semibold text-slate-700">{formatCell(row[column.name], column, tableColumnFormats)}</td>)}
                 </tr>
               ))}
             </tbody>
@@ -203,7 +305,7 @@ export function ChartRenderer({ type, metric, dimension, showLegend = true, form
             {rows.map(row => (
               <tr key={row.name} className="border-t border-slate-100 bg-white">
                 <td className="px-3 py-2 font-semibold text-slate-700">{row.name}</td>
-                <td className="px-3 py-2 font-black text-slate-950">{formatValue(metric, Number(row.value || 0), formatConfig)}</td>
+                <td className="px-3 py-2 font-black text-slate-950">{formatValue(metric, Number(row.value || 0), valueFormatConfig)}</td>
                 <td className="px-3 py-2 text-slate-500">{total ? Math.round((Number(row.value || 0) / total) * 100) : 0}%</td>
               </tr>
             ))}
@@ -218,8 +320,8 @@ export function ChartRenderer({ type, metric, dimension, showLegend = true, form
       <BarChart data={rows} margin={{ top: 10, right: 12, bottom: 0, left: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
         <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#64748b' }} interval="preserveStartEnd" />
-        <YAxis tick={{ fontSize: 11, fill: '#64748b' }} />
-        <Tooltip formatter={(value: number) => formatValue(metric, value, formatConfig)} labelFormatter={(value) => `${dimensionLabel}: ${value}`} />
+        <YAxis tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={(value) => formatAxisTick(metric, value, valueFormatConfig)} />
+        <Tooltip formatter={(value: number) => formatValue(metric, value, valueFormatConfig)} labelFormatter={(value) => `${dimensionLabel}: ${value}`} />
         {showLegend && <Legend verticalAlign="bottom" height={26} />}
         <Bar name={metricLabel} dataKey="value" fill="var(--easy-primary)" radius={[8, 8, 0, 0]} />
       </BarChart>

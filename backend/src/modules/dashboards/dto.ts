@@ -73,8 +73,8 @@ export class WidgetDto {
   tableColumns?: string[];
 
   @IsOptional()
-  @IsEnum(['SUM', 'AVG', 'COUNT', 'MIN', 'MAX'])
-  aggregation?: 'SUM' | 'AVG' | 'COUNT' | 'MIN' | 'MAX';
+  @IsEnum(['SUM', 'AVG', 'COUNT', 'DISTINCT_COUNT', 'MIN', 'MAX'])
+  aggregation?: 'SUM' | 'AVG' | 'COUNT' | 'DISTINCT_COUNT' | 'MIN' | 'MAX';
 
   @IsOptional()
   config?: Record<string, unknown>;
@@ -104,8 +104,8 @@ export class DashboardDataPreviewDto {
   tableColumns?: string[];
 
   @IsOptional()
-  @IsEnum(['SUM', 'AVG', 'COUNT', 'MIN', 'MAX'])
-  aggregation?: 'SUM' | 'AVG' | 'COUNT' | 'MIN' | 'MAX';
+  @IsEnum(['SUM', 'AVG', 'COUNT', 'DISTINCT_COUNT', 'MIN', 'MAX'])
+  aggregation?: 'SUM' | 'AVG' | 'COUNT' | 'DISTINCT_COUNT' | 'MIN' | 'MAX';
 
   @IsOptional()
   filters?: Record<string, unknown>[];

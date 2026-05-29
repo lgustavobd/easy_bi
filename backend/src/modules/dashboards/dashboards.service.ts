@@ -17,7 +17,7 @@ type DataRequest = {
   metricColumn?: string;
   dimensionColumn?: string;
   tableColumns?: string[];
-  aggregation?: 'SUM' | 'AVG' | 'COUNT' | 'MIN' | 'MAX' | string;
+  aggregation?: 'SUM' | 'AVG' | 'COUNT' | 'DISTINCT_COUNT' | 'MIN' | 'MAX' | string;
   filters?: FilterRule[];
   limit?: number;
 };
@@ -27,7 +27,20 @@ type Accumulator = {
   count: number;
   min: number | null;
   max: number | null;
+  distinctValues: Set<string>;
 };
+
+type MetricColumnMeta = {
+  name: string;
+  dataType: string;
+  formatConfig?: any;
+} | null;
+
+type DatasetColumnMeta = {
+  name: string;
+  dataType?: string | null;
+  formatConfig?: any;
+} | null;
 
 const DATASET_SCAN_CHUNK_SIZE = Number(process.env.DATASET_SCAN_CHUNK_SIZE || 5000);
 
@@ -221,7 +234,7 @@ export class DashboardsService {
       metricColumn: widget.metricColumn || undefined,
       dimensionColumn: widget.dimensionColumn || undefined,
       tableColumns: Array.isArray((widget.config as any)?.tableColumns) ? (widget.config as any).tableColumns : undefined,
-      aggregation: widget.aggregation || 'COUNT',
+      aggregation: (widget.config as any)?.aggregationMode || widget.aggregation || 'COUNT',
       filters: this.keepOnlyDatasetFilters(filters, datasetId)
     }, organizationId, user);
   }
@@ -236,6 +249,7 @@ export class DashboardsService {
     const search = this.normalizeText(dto.search || '');
     const limit = Math.min(Math.max(Number(dto.limit || 250), 20), 1000);
     const filters = this.keepOnlyDatasetFilters(Array.isArray(dto.filters) ? dto.filters : [], dto.datasetId).filter((filter) => filter.dimension !== dto.column);
+    const optionColumn = await this.resolveDatasetColumn(dto.datasetId, dto.column);
     const values = new Set<string>();
 
     await this.scanDatasetRows(dto.datasetId, organizationId, (row) => {
@@ -247,7 +261,7 @@ export class DashboardsService {
       values.add(value);
     });
 
-    const sorted = Array.from(values).sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
+    const sorted = Array.from(values).sort((a, b) => this.compareDateLikeValues(a, b, optionColumn) ?? a.localeCompare(b, 'pt-BR', { numeric: true }));
     return {
       options: sorted.slice(0, limit).map((value) => ({ label: value, value })),
       total: sorted.length,
@@ -262,6 +276,10 @@ export class DashboardsService {
     const metric = request.metricColumn || '';
     const dimension = request.dimensionColumn || '';
     const tableColumns = await this.resolveTableColumns(request.datasetId, request.tableColumns);
+    const metricColumn = metric ? await this.resolveMetricColumn(request.datasetId, metric) : null;
+    const dimensionColumn = dimension ? await this.resolveDatasetColumn(request.datasetId, dimension) : null;
+    const tableSortColumn = tableColumns.find((column) => this.isDateLikeColumn(column)) || null;
+    const metricFormatConfig = this.metricValueFormat(metricColumn);
     const aggregation = this.normalizeAggregation(request.aggregation || 'COUNT');
     const filters = this.keepOnlyDatasetFilters(Array.isArray(request.filters) ? request.filters : [], request.datasetId);
     const limit = Math.min(Math.max(Number(request.limit || 80), 1), 1000);
@@ -274,12 +292,14 @@ export class DashboardsService {
       if (!this.applyFilters(row, filters)) return;
       totalRows += 1;
       if (tableColumns.length) {
-        if (tableRows.length < limit) {
-          tableRows.push(Object.fromEntries(tableColumns.map((column) => [column.name, row[column.name] ?? null])));
-        }
+        const tableRow = Object.fromEntries(tableColumns.map((column) => [column.name, row[column.name] ?? null]));
+        if (tableSortColumn) this.addSortedTableRow(tableRows, tableRow, tableSortColumn, limit);
+        else if (tableRows.length < limit) tableRows.push(tableRow);
         return;
       }
-      const metricValue = aggregation === 'COUNT' ? 1 : this.toNumber(row[metric]);
+      const metricValue = aggregation === 'COUNT' && !metric
+        ? '__row__'
+        : ['COUNT', 'DISTINCT_COUNT'].includes(aggregation) ? row[metric] : this.toMetricNumber(row[metric], metricColumn);
       this.addToAccumulator(totalAccumulator, metricValue, aggregation);
 
       if (dimension) {
@@ -300,18 +320,19 @@ export class DashboardsService {
     }
 
     if (!dimension) {
-      return { value: this.finalizeAccumulator(totalAccumulator, aggregation), rows: [], totalRows };
+      return { value: this.finalizeAccumulator(totalAccumulator, aggregation), rows: [], totalRows, ...(metricFormatConfig ? { formatConfig: metricFormatConfig } : {}) };
     }
 
     const groupedRows = Array.from(grouped.entries())
       .map(([name, accumulator]) => ({ name, value: this.finalizeAccumulator(accumulator, aggregation) }))
-      .sort((a, b) => Number(b.value) - Number(a.value))
+      .sort((a, b) => this.compareGroupedRows(a, b, dimensionColumn))
       .slice(0, limit);
 
     return {
       value: this.finalizeAccumulator(totalAccumulator, aggregation),
       rows: groupedRows,
-      totalRows
+      totalRows,
+      ...(metricFormatConfig ? { formatConfig: metricFormatConfig } : {})
     };
   }
 
@@ -338,7 +359,7 @@ export class DashboardsService {
 
     const datasetColumns = await this.prisma.datasetColumn.findMany({
       where: { datasetId },
-      select: { name: true, originalName: true }
+      select: { name: true, originalName: true, dataType: true, formatConfig: true }
     });
     const byName = new Map(datasetColumns.map((column) => [column.name, column]));
     const missing = cleanColumns.filter((column) => !byName.has(column));
@@ -346,18 +367,36 @@ export class DashboardsService {
 
     return cleanColumns.map((name) => {
       const column = byName.get(name) as any;
-      return { name, label: column?.originalName || name };
+      return { name, label: column?.originalName || name, dataType: column?.dataType, formatConfig: column?.formatConfig };
     });
+  }
+
+  private async resolveMetricColumn(datasetId: string, metricColumn: string): Promise<MetricColumnMeta> {
+    return this.prisma.datasetColumn.findFirst({
+      where: { datasetId, name: metricColumn },
+      select: { name: true, dataType: true, formatConfig: true }
+    }) as Promise<MetricColumnMeta>;
+  }
+
+  private async resolveDatasetColumn(datasetId: string, columnName: string): Promise<DatasetColumnMeta> {
+    return this.prisma.datasetColumn.findFirst({
+      where: { datasetId, name: columnName },
+      select: { name: true, dataType: true, formatConfig: true }
+    }) as Promise<DatasetColumnMeta>;
   }
 
   private toWidgetData(dashboardId: string, dto: any, includeDashboard = true) {
     const config = { ...((dto.config as any) || {}) };
+    const aggregation = dto.aggregation ? this.normalizeAggregation(dto.aggregation) : undefined;
+    if (aggregation === 'DISTINCT_COUNT') config.aggregationMode = 'DISTINCT_COUNT';
+    else delete config.aggregationMode;
     if (dto.type === 'TABLE') {
       const tableColumns = Array.isArray(config.tableColumns) && config.tableColumns.length
         ? config.tableColumns
         : Array.isArray(dto.tableColumns) ? dto.tableColumns : [];
       config.tableColumns = tableColumns;
     }
+    Object.keys(config).forEach((key) => config[key] === undefined && delete config[key]);
     const data: Record<string, any> = {
       ...(includeDashboard ? { dashboardId } : {}),
       datasetId: dto.datasetId || null,
@@ -365,7 +404,7 @@ export class DashboardsService {
       title: dto.title,
       metricColumn: dto.metricColumn || null,
       dimensionColumn: dto.dimensionColumn || null,
-      aggregation: dto.aggregation ? this.normalizeAggregation(dto.aggregation) : undefined,
+      aggregation: aggregation === 'DISTINCT_COUNT' ? 'COUNT' : aggregation,
       config: Object.keys(config).length ? config : undefined,
       positionConfig: dto.positionConfig || undefined,
       styleConfig: dto.styleConfig || undefined
@@ -457,37 +496,177 @@ export class DashboardsService {
     if (value === 'SOMA') return 'SUM';
     if (value === 'MÉDIA' || value === 'MEDIA') return 'AVG';
     if (value === 'CONTAGEM') return 'COUNT';
+    if (value === 'CONTAGEM_DISTINTA' || value === 'COUNT_DISTINCT') return 'DISTINCT_COUNT';
     if (value === 'MÍNIMO' || value === 'MINIMO') return 'MIN';
     if (value === 'MÁXIMO' || value === 'MAXIMO') return 'MAX';
-    if (['SUM', 'AVG', 'COUNT', 'MIN', 'MAX'].includes(value)) return value as 'SUM' | 'AVG' | 'COUNT' | 'MIN' | 'MAX';
+    if (['SUM', 'AVG', 'COUNT', 'DISTINCT_COUNT', 'MIN', 'MAX'].includes(value)) return value as 'SUM' | 'AVG' | 'COUNT' | 'DISTINCT_COUNT' | 'MIN' | 'MAX';
     return 'COUNT';
   }
 
   private emptyAccumulator(): Accumulator {
-    return { sum: 0, count: 0, min: null, max: null };
+    return { sum: 0, count: 0, min: null, max: null, distinctValues: new Set<string>() };
   }
 
-  private addToAccumulator(accumulator: Accumulator, value: number, aggregation: string) {
-    if (aggregation !== 'COUNT' && Number.isNaN(value)) return;
-    accumulator.count += 1;
+  private addToAccumulator(accumulator: Accumulator, value: any, aggregation: string) {
+    if (aggregation === 'DISTINCT_COUNT') {
+      const key = this.distinctKey(value);
+      if (key) accumulator.distinctValues.add(key);
+      accumulator.count = accumulator.distinctValues.size;
+      return;
+    }
     if (aggregation === 'COUNT') {
+      if (this.isEmptyMetricValue(value)) return;
+      accumulator.count += 1;
       accumulator.sum += 1;
       accumulator.min = accumulator.min === null ? 1 : Math.min(accumulator.min, 1);
       accumulator.max = accumulator.max === null ? 1 : Math.max(accumulator.max, 1);
       return;
     }
+    if (Number.isNaN(value)) return;
+    accumulator.count += 1;
     accumulator.sum += value;
     accumulator.min = accumulator.min === null ? value : Math.min(accumulator.min, value);
     accumulator.max = accumulator.max === null ? value : Math.max(accumulator.max, value);
   }
 
   private finalizeAccumulator(accumulator: Accumulator, aggregation: string) {
+    if (aggregation === 'DISTINCT_COUNT') return accumulator.distinctValues.size;
     if (aggregation === 'COUNT') return accumulator.count;
     if (!accumulator.count) return 0;
     if (aggregation === 'AVG') return accumulator.sum / accumulator.count;
     if (aggregation === 'MIN') return accumulator.min || 0;
     if (aggregation === 'MAX') return accumulator.max || 0;
     return accumulator.sum;
+  }
+
+  private isEmptyMetricValue(value: any) {
+    return value === null || value === undefined || String(value).trim() === '';
+  }
+
+  private distinctKey(value: any) {
+    if (this.isEmptyMetricValue(value)) return '';
+    return this.normalizeText(String(value));
+  }
+
+  private addSortedTableRow(rows: Record<string, any>[], row: Record<string, any>, sortColumn: NonNullable<DatasetColumnMeta>, limit: number) {
+    rows.push(row);
+    rows.sort((a, b) => this.compareDateLikeValues(a[sortColumn.name], b[sortColumn.name], sortColumn) ?? 0);
+    if (rows.length > limit) rows.pop();
+  }
+
+  private compareGroupedRows(a: { name: string; value: number }, b: { name: string; value: number }, column: DatasetColumnMeta) {
+    const dateCompare = this.compareDateLikeValues(a.name, b.name, column);
+    if (dateCompare !== null && dateCompare !== 0) return dateCompare;
+    if (dateCompare !== null) return a.name.localeCompare(b.name, 'pt-BR', { numeric: true });
+    return Number(b.value) - Number(a.value);
+  }
+
+  private compareDateLikeValues(a: any, b: any, column: DatasetColumnMeta) {
+    if (!this.isDateLikeColumn(column)) return null;
+    const left = this.dateSortValue(a, column);
+    const right = this.dateSortValue(b, column);
+    if (left === null && right === null) return 0;
+    if (left === null) return 1;
+    if (right === null) return -1;
+    return left - right;
+  }
+
+  private isDateLikeColumn(column: DatasetColumnMeta) {
+    if (!column) return false;
+    const type = String(column.dataType || '').toUpperCase();
+    const config = (column.formatConfig || {}) as any;
+    return type === 'DATE' || Boolean(config.dateDerivedColumn) || /_(mes|ano)$/i.test(String(column.name || ''));
+  }
+
+  private dateSortValue(value: any, column: DatasetColumnMeta) {
+    const text = String(value ?? '').trim();
+    if (!text || text.toLowerCase() === 'nÃ£o informado' || text.toLowerCase() === 'não informado') return null;
+    const config = (column?.formatConfig || {}) as any;
+    const name = String(column?.name || '');
+
+    if (config.grain === 'year' || /_ano$/i.test(name)) {
+      const year = Number(text.match(/\d{4}/)?.[0]);
+      return Number.isFinite(year) ? year : null;
+    }
+
+    if (config.grain === 'month' || /_mes$/i.test(name)) {
+      const isoMonth = text.match(/^(\d{4})-(\d{1,2})$/);
+      if (isoMonth) return Number(isoMonth[1]) * 100 + Number(isoMonth[2]);
+      const brMonth = text.match(/^(\d{1,2})\/(\d{4})$/);
+      if (brMonth) return Number(brMonth[2]) * 100 + Number(brMonth[1]);
+    }
+
+    const timestamp = this.toDateTime(value);
+    return timestamp === null ? null : timestamp;
+  }
+
+  private metricValueFormat(column: MetricColumnMeta) {
+    const config = (column?.formatConfig || {}) as any;
+    if (config?.valueKind === 'DURATION' || config?.type === 'duration') {
+      return {
+        type: 'duration',
+        durationUnit: 'seconds',
+        durationInput: config.durationInput || 'duration_text'
+      };
+    }
+    return null;
+  }
+
+  private toMetricNumber(value: any, column: MetricColumnMeta) {
+    const config = (column?.formatConfig || {}) as any;
+    if (config?.valueKind === 'DURATION' || config?.type === 'duration') {
+      return this.toDurationSeconds(value, config.durationInput || 'duration_text');
+    }
+    return this.toNumber(value);
+  }
+
+  private toDurationSeconds(value: any, input = 'duration_text') {
+    if (value === null || value === undefined || value === '') return Number.NaN;
+    if (typeof value === 'number') {
+      if (!Number.isFinite(value)) return Number.NaN;
+      if (input === 'minutes') return value * 60;
+      if (input === 'seconds') return value;
+      if (input === 'excel_day_fraction') return value * 86_400;
+      return value * 3_600;
+    }
+
+    const raw = String(value).trim();
+    if (!raw) return Number.NaN;
+    const sign = raw.startsWith('-') ? -1 : 1;
+    const text = raw.replace(/^-/, '').toLowerCase().trim();
+
+    const hms = text.match(/^(\d{1,7}):([0-5]?\d)(?::([0-5]?\d))?$/);
+    if (hms) {
+      const hours = Number(hms[1] || 0);
+      const minutes = Number(hms[2] || 0);
+      const seconds = Number(hms[3] || 0);
+      return sign * (hours * 3_600 + minutes * 60 + seconds);
+    }
+
+    const shortText = text.match(/^(\d+(?:[,.]\d+)?)\s*h\s*(\d{1,2})(?:\s*m)?$/);
+    if (shortText) {
+      return sign * (this.toNumber(shortText[1]) * 3_600 + Number(shortText[2] || 0) * 60);
+    }
+
+    const compact = text.match(/^(?:(\d+(?:[,.]\d+)?)\s*(?:h|hr|hrs|hora|horas))?\s*(?:(\d+(?:[,.]\d+)?)\s*(?:m|min|mins|minuto|minutos))?\s*(?:(\d+(?:[,.]\d+)?)\s*(?:s|seg|sec|segundo|segundos))?$/);
+    if (compact && (compact[1] || compact[2] || compact[3])) {
+      const hours = this.toNumber(compact[1] || 0);
+      const minutes = this.toNumber(compact[2] || 0);
+      const seconds = this.toNumber(compact[3] || 0);
+      return sign * (hours * 3_600 + minutes * 60 + seconds);
+    }
+
+    const isoTime = text.match(/t(\d{2}):(\d{2})(?::(\d{2}))?/);
+    if (isoTime && /1899|1900|1970/.test(text)) {
+      return sign * (Number(isoTime[1]) * 3_600 + Number(isoTime[2]) * 60 + Number(isoTime[3] || 0));
+    }
+
+    const numeric = this.toNumber(text);
+    if (Number.isNaN(numeric)) return Number.NaN;
+    if (input === 'minutes') return sign * numeric * 60;
+    if (input === 'seconds') return sign * numeric;
+    if (input === 'excel_day_fraction') return sign * numeric * 86_400;
+    return sign * numeric * 3_600;
   }
 
   private toNumber(value: any) {
@@ -505,13 +684,21 @@ export class DashboardsService {
     if (!text) return null;
 
     let normalized = text;
-    const brDate = text.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-    if (brDate) normalized = `${brDate[3]}-${brDate[2]}-${brDate[1]}`;
+    const brDate = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?$/);
+    if (brDate) {
+      const year = this.expandShortYear(Number(brDate[3]));
+      normalized = `${year}-${String(brDate[2]).padStart(2, '0')}-${String(brDate[1]).padStart(2, '0')}${brDate[4] ? `T${brDate[4]}:${brDate[5]}:${brDate[6] || '00'}` : ''}`;
+    }
 
     const timestamp = Date.parse(normalized);
     if (Number.isNaN(timestamp)) return null;
     if (endOfDay && /^\d{4}-\d{2}-\d{2}$/.test(normalized)) return timestamp + 86_399_999;
     return timestamp;
+  }
+
+  private expandShortYear(year: number) {
+    if (year >= 100) return year;
+    return year >= 70 ? 1900 + year : 2000 + year;
   }
 
   private normalizeText(value: string) {

@@ -12,6 +12,11 @@ const typeLabel: Record<string, string> = {
   TEXT: 'Texto', NUMBER: 'Número', DATE: 'Data', BOOLEAN: 'Booleano', CURRENCY: 'Moeda', PERCENTAGE: 'Percentual'
 };
 
+function columnTypeLabel(column: any) {
+  const config = column?.formatConfig || {};
+  if (config.valueKind === 'DURATION' || config.type === 'duration') return 'Horas / duracao';
+  return typeLabel[column?.dataType] || column?.dataType;
+}
 
 function forceModalViewportTop() {
   if (typeof window === 'undefined') return;
@@ -716,7 +721,7 @@ export function DatasetUploadPage() {
             <div className="mt-6 min-w-0 overflow-hidden rounded-[2rem] border border-slate-200 bg-white">
               <div className="flex items-center gap-3 border-b border-slate-100 p-5"><CheckCircle2 className="text-emerald-500" /><div><p className="font-black text-slate-950">Colunas detectadas</p><p className="text-sm text-slate-500">{result.rowCount} linhas · {columns.length} colunas</p></div></div>
               <div className="max-w-full overflow-auto">
-                <table className="min-w-[900px] text-left text-sm"><thead className="bg-slate-50 text-xs uppercase tracking-wider text-slate-500"><tr><th className="px-5 py-3">Coluna</th><th className="px-5 py-3">Tipo</th><th className="px-5 py-3">Semântica</th><th className="px-5 py-3">Métrica</th><th className="px-5 py-3">Dimensão</th><th className="px-5 py-3">Amostras</th></tr></thead><tbody className="divide-y divide-slate-100">{columns.map((column: any) => <tr key={column.id || column.name} className="hover:bg-primary-soft"><td className="px-5 py-4 font-bold text-slate-900">{column.name}</td><td className="px-5 py-4"><span className="rounded-full bg-slate-100 px-3 py-1 font-semibold text-slate-600">{typeLabel[column.dataType] || column.dataType}</span></td><td className="px-5 py-4 text-slate-600">{column.semanticType}</td><td className="px-5 py-4">{column.isMetric ? 'Sim' : 'Não'}</td><td className="px-5 py-4">{column.isDimension ? 'Sim' : 'Não'}</td><td className="max-w-[280px] truncate px-5 py-4 text-slate-500">{(column.sampleValues || []).slice(0, 3).join(', ')}</td></tr>)}</tbody></table>
+                <table className="min-w-[900px] text-left text-sm"><thead className="bg-slate-50 text-xs uppercase tracking-wider text-slate-500"><tr><th className="px-5 py-3">Coluna</th><th className="px-5 py-3">Tipo</th><th className="px-5 py-3">Semântica</th><th className="px-5 py-3">Métrica</th><th className="px-5 py-3">Dimensão</th><th className="px-5 py-3">Amostras</th></tr></thead><tbody className="divide-y divide-slate-100">{columns.map((column: any) => <tr key={column.id || column.name} className="hover:bg-primary-soft"><td className="px-5 py-4 font-bold text-slate-900">{column.name}</td><td className="px-5 py-4"><span className="rounded-full bg-slate-100 px-3 py-1 font-semibold text-slate-600">{columnTypeLabel(column)}</span></td><td className="px-5 py-4 text-slate-600">{column.semanticType}</td><td className="px-5 py-4">{column.isMetric ? 'Sim' : 'Não'}</td><td className="px-5 py-4">{column.isDimension ? 'Sim' : 'Não'}</td><td className="max-w-[280px] truncate px-5 py-4 text-slate-500">{(column.sampleValues || []).slice(0, 3).join(', ')}</td></tr>)}</tbody></table>
               </div>
             </div>
           )}

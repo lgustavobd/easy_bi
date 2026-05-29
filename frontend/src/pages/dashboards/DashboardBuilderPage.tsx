@@ -15,7 +15,7 @@ import { useAuthStore } from '../../store/auth.store';
 const ResponsiveGridLayout = WidthProvider(GridLayout);
 
 type WidgetType = 'KPI' | 'BAR_CHART' | 'LINE_CHART' | 'DONUT_CHART' | 'TABLE';
-type Aggregation = 'SUM' | 'AVG' | 'COUNT' | 'MIN' | 'MAX';
+type Aggregation = 'SUM' | 'AVG' | 'COUNT' | 'DISTINCT_COUNT' | 'MIN' | 'MAX';
 
 type WidgetState = {
   id: string;
@@ -28,7 +28,7 @@ type WidgetState = {
   tableColumnFormats: TableColumnFormatConfig;
   aggregation: Aggregation;
   showLegend: boolean;
-  valueFormat: 'auto' | 'number' | 'currency' | 'percentage' | 'integer';
+  valueFormat: 'auto' | 'number' | 'currency' | 'percentage' | 'percentageDecimal' | 'integer' | 'duration';
   valuePrefix: string;
   valueSuffix: string;
   valueDecimals: number;
@@ -44,9 +44,15 @@ const tableFormatOptions = [
   { value: 'auto', label: 'Automatico' },
   { value: 'number', label: 'Numero decimal' },
   { value: 'integer', label: 'Inteiro' },
+  { value: 'duration', label: 'Horas / duracao' },
   { value: 'currency', label: 'Moeda' },
   { value: 'percentage', label: 'Percentual direto' },
-  { value: 'percentageDecimal', label: 'Percentual 0-1 -> 0-100%' }
+  { value: 'percentageDecimal', label: 'Percentual 0-1 -> 0-100%' },
+  { value: 'dateBr', label: 'Data dd/mm/aaaa' },
+  { value: 'dateTimeBr', label: 'Data e hora' },
+  { value: 'monthYear', label: 'Mes/ano' },
+  { value: 'monthNameYear', label: 'Mes por extenso' },
+  { value: 'year', label: 'Ano' }
 ] as const;
 
 const currencyOptions = ['BRL', 'USD', 'EUR', 'GBP', 'ARS', 'CLP', 'MXN'];
@@ -54,7 +60,8 @@ const currencyOptions = ['BRL', 'USD', 'EUR', 'GBP', 'ARS', 'CLP', 'MXN'];
 const aggregationOptions: Array<{ value: Aggregation; label: string; hint: string }> = [
   { value: 'SUM', label: 'Soma', hint: 'Totaliza valores numéricos' },
   { value: 'AVG', label: 'Média', hint: 'Calcula média dos valores' },
-  { value: 'COUNT', label: 'Contagem', hint: 'Conta as linhas filtradas' },
+  { value: 'COUNT', label: 'Contagem', hint: 'Conta registros do atributo' },
+  { value: 'DISTINCT_COUNT', label: 'Contagem distinta', hint: 'Conta valores unicos do atributo' },
   { value: 'MIN', label: 'Mínimo', hint: 'Menor valor encontrado' },
   { value: 'MAX', label: 'Máximo', hint: 'Maior valor encontrado' }
 ];
@@ -180,6 +187,19 @@ function isNumericColumn(column: any) {
   return Boolean(column?.isMetric || ['NUMBER', 'CURRENCY', 'PERCENTAGE'].includes(String(column?.dataType || '').toUpperCase()));
 }
 
+function isDateColumn(column: any) {
+  const config = column?.formatConfig || {};
+  return String(column?.dataType || '').toUpperCase() === 'DATE' || Boolean(config.dateDerivedColumn) || /_(mes|ano)$/i.test(String(column?.name || ''));
+}
+
+function isFormattableTableColumn(column: any) {
+  return isNumericColumn(column) || isDateColumn(column);
+}
+
+function isDateFormat(type: string) {
+  return ['dateBr', 'dateTimeBr', 'monthYear', 'monthNameYear', 'year'].includes(type);
+}
+
 function cleanTableColumnFormats(formats: TableColumnFormatConfig = {}, tableColumns: string[] = []) {
   const allowed = new Set(tableColumns);
   return Object.fromEntries(Object.entries(formats).filter(([column, config]) => allowed.has(column) && config && config.type && config.type !== 'auto'));
@@ -241,7 +261,7 @@ function normalizeWidget(widget: any, dashboardDataset: any): WidgetState {
     dimensionColumn: widget.dimensionColumn || firstDimension(dashboardDataset),
     tableColumns: Array.isArray(config.tableColumns) && config.tableColumns.length ? config.tableColumns : [widget.dimensionColumn || firstDimension(dashboardDataset), widget.metricColumn || firstMetric(dashboardDataset)].filter(Boolean),
     tableColumnFormats: typeof config.tableColumnFormats === 'object' && config.tableColumnFormats ? config.tableColumnFormats : {},
-    aggregation: widget.aggregation || 'SUM',
+    aggregation: config.aggregationMode || widget.aggregation || 'SUM',
     showLegend: config.showLegend ?? (widget.type !== 'KPI' && widget.type !== 'TABLE'),
     valueFormat: config.valueFormat || config.format?.type || 'auto',
     valuePrefix: config.valuePrefix || config.format?.prefix || '',
@@ -272,6 +292,7 @@ function widgetPayload(widget: WidgetState, datasetId: string) {
       valuePrefix: widget.valuePrefix,
       valueSuffix: widget.valueSuffix,
       valueDecimals: widget.valueDecimals,
+      aggregationMode: widget.aggregation === 'DISTINCT_COUNT' ? 'DISTINCT_COUNT' : undefined,
       format: { type: widget.valueFormat, prefix: widget.valuePrefix, suffix: widget.valueSuffix, decimals: widget.valueDecimals }
     },
     positionConfig: { x: widget.x, y: widget.y, w: widget.w, h: widget.h },
@@ -348,10 +369,10 @@ function WidgetCard({ widget, filters, onEdit, onRemove, onSelect, onToggleLock,
 
 function WidgetEditorModal({ widget, dataset, filters, onClose, onSave }: { widget: WidgetState; dataset: any; filters: FilterRule[]; onClose: () => void; onSave: (payload: WidgetState) => void }) {
   const [draft, setDraft] = useState<WidgetState>(widget);
-  const metrics = metricColumns(dataset);
+  const metrics = ['COUNT', 'DISTINCT_COUNT'].includes(draft.aggregation) ? getColumns(dataset) : metricColumns(dataset);
   const dimensions = dimensionColumns(dataset);
   const tableSelectableColumns = getColumns(dataset);
-  const selectedNumericTableColumns = tableSelectableColumns.filter((column: any) => (draft.tableColumns || []).includes(column.name) && isNumericColumn(column));
+  const selectedFormattableTableColumns = tableSelectableColumns.filter((column: any) => (draft.tableColumns || []).includes(column.name) && isFormattableTableColumn(column));
   const selectedType = widgetCatalog.find((item) => item.type === draft.type) || widgetCatalog[1];
   const SelectedIcon = selectedType.icon;
   const { data: previewData, isFetching: previewLoading } = useQuery({
@@ -387,6 +408,12 @@ function WidgetEditorModal({ widget, dataset, filters, onClose, onSave }: { widg
 
   function patchDraft(payload: Partial<WidgetState>) {
     setDraft((current) => ({ ...current, ...payload, datasetId: dataset?.id || current.datasetId }));
+  }
+
+  function changeAggregation(aggregation: Aggregation) {
+    const nextMetrics = ['COUNT', 'DISTINCT_COUNT'].includes(aggregation) ? getColumns(dataset) : metricColumns(dataset);
+    const currentMetricExists = nextMetrics.some((column: any) => column.name === draft.metricColumn);
+    patchDraft({ aggregation, metricColumn: currentMetricExists ? draft.metricColumn : nextMetrics[0]?.name || '' });
   }
 
   function toggleTableColumn(columnName: string) {
@@ -493,7 +520,7 @@ function WidgetEditorModal({ widget, dataset, filters, onClose, onSave }: { widg
               <div className="flex items-center gap-3"><div className="section-step">2</div><div><p className="font-black text-slate-950">Configure os dados</p><p className="text-xs font-medium text-slate-500">Métrica, atributo e agregação do dataset único <strong>{dataset?.name || 'selecionado'}</strong>.</p></div></div>
               <div className="mt-4 grid gap-3 md:grid-cols-2">
                 <label className="space-y-1 md:col-span-2"><span className="form-label">Título</span><input value={draft.title} onChange={(event) => patchDraft({ title: event.target.value })} className="form-input" /></label>
-                <label className="space-y-1"><span className="form-label">Métrica</span><select value={draft.metricColumn} onChange={(event) => patchDraft({ metricColumn: event.target.value })} className="form-select">{metrics.map((column: any) => <option key={column.id || column.name} value={column.name}>{columnLabel(column)}</option>)}</select></label>
+                <label className="space-y-1"><span className="form-label">{['COUNT', 'DISTINCT_COUNT'].includes(draft.aggregation) ? 'Atributo contado' : 'Métrica'}</span><select value={draft.metricColumn} onChange={(event) => patchDraft({ metricColumn: event.target.value })} className="form-select">{metrics.map((column: any) => <option key={column.id || column.name} value={column.name}>{columnLabel(column)}</option>)}</select></label>
                 {draft.type !== 'KPI' && <label className="space-y-1"><span className="form-label">Atributo/dimensão</span><select value={draft.dimensionColumn} onChange={(event) => patchDraft({ dimensionColumn: event.target.value })} className="form-select">{dimensions.map((column: any) => <option key={column.id || column.name} value={column.name}>{columnLabel(column)}</option>)}</select></label>}
               </div>
               {draft.type === 'TABLE' && (
@@ -516,18 +543,19 @@ function WidgetEditorModal({ widget, dataset, filters, onClose, onSave }: { widg
                   <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div>
-                        <p className="font-black text-slate-950">Formato das colunas numericas</p>
+                        <p className="font-black text-slate-950">Formato das colunas</p>
                         <p className="text-xs font-medium text-slate-500">A mascara muda apenas a exibicao da tabela. O dataset continua intacto.</p>
                       </div>
-                      <span className="rounded-full bg-white px-3 py-1 text-xs font-black text-slate-500">{selectedNumericTableColumns.length} colunas</span>
+                      <span className="rounded-full bg-white px-3 py-1 text-xs font-black text-slate-500">{selectedFormattableTableColumns.length} colunas</span>
                     </div>
-                    {!selectedNumericTableColumns.length ? (
-                      <p className="mt-3 rounded-xl border border-dashed border-slate-200 bg-white p-3 text-xs font-bold text-slate-500">Selecione uma coluna numerica para configurar percentual, moeda ou decimais.</p>
+                    {!selectedFormattableTableColumns.length ? (
+                      <p className="mt-3 rounded-xl border border-dashed border-slate-200 bg-white p-3 text-xs font-bold text-slate-500">Selecione uma coluna numerica ou de data para configurar moeda, percentual, horas ou formato de data.</p>
                     ) : (
                       <div className="mt-3 grid gap-3">
-                        {selectedNumericTableColumns.map((column: any) => {
+                        {selectedFormattableTableColumns.map((column: any) => {
                           const columnFormat = tableColumnFormat(column.name);
                           const formatType = String(columnFormat.type || 'auto');
+                          const dateFormat = isDateFormat(formatType);
                           return (
                             <div key={column.id || column.name} className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-3 lg:grid-cols-[1.2fr_1fr_0.8fr_0.65fr]">
                               <div className="min-w-0">
@@ -546,7 +574,7 @@ function WidgetEditorModal({ widget, dataset, filters, onClose, onSave }: { widg
                               </label>
                               <label className="space-y-1">
                                 <span className="form-label">Decimais</span>
-                                <input type="number" min={0} max={6} value={Number(columnFormat.decimals ?? 2)} disabled={formatType === 'auto' || formatType === 'integer'} onChange={(event) => patchTableColumnFormat(column.name, { decimals: Number(event.target.value) })} className="form-input disabled:bg-slate-100 disabled:text-slate-400" />
+                                <input type="number" min={0} max={6} value={Number(columnFormat.decimals ?? 2)} disabled={formatType === 'auto' || formatType === 'integer' || formatType === 'duration' || dateFormat} onChange={(event) => patchTableColumnFormat(column.name, { decimals: Number(event.target.value) })} className="form-input disabled:bg-slate-100 disabled:text-slate-400" />
                               </label>
                             </div>
                           );
@@ -560,7 +588,7 @@ function WidgetEditorModal({ widget, dataset, filters, onClose, onSave }: { widg
                 </div>
               )}
               {draft.type !== 'TABLE' && <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
-                {aggregationOptions.map((option) => <button type="button" key={option.value} onClick={() => patchDraft({ aggregation: option.value })} className={`aggregation-card aggregation-card-compact ${draft.aggregation === option.value ? 'aggregation-card-active' : ''}`}><strong>{option.label}</strong><span>{option.hint}</span></button>)}
+                {aggregationOptions.map((option) => <button type="button" key={option.value} onClick={() => changeAggregation(option.value)} className={`aggregation-card aggregation-card-compact ${draft.aggregation === option.value ? 'aggregation-card-active' : ''}`}><strong>{option.label}</strong><span>{option.hint}</span></button>)}
               </div>}
 
               <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
@@ -569,7 +597,7 @@ function WidgetEditorModal({ widget, dataset, filters, onClose, onSave }: { widg
                   <p className="text-xs font-medium text-slate-500">Defina como o número aparece no KPI, tooltip e legenda. Tabelas podem ter formato por coluna acima.</p>
                 </div>
                 <div className="mt-3 grid gap-3 md:grid-cols-4">
-                  <label className="space-y-1"><span className="form-label">Formato</span><select value={draft.valueFormat} onChange={(event) => patchDraft({ valueFormat: event.target.value as WidgetState['valueFormat'] })} className="form-select"><option value="auto">Automático</option><option value="currency">Moeda BRL</option><option value="number">Número</option><option value="integer">Inteiro</option><option value="percentage">Percentual</option></select></label>
+                  <label className="space-y-1"><span className="form-label">Formato</span><select value={draft.valueFormat} onChange={(event) => patchDraft({ valueFormat: event.target.value as WidgetState['valueFormat'] })} className="form-select"><option value="auto">Automático</option><option value="currency">Moeda BRL</option><option value="number">Número</option><option value="integer">Inteiro</option><option value="percentage">Percentual</option><option value="percentageDecimal">Percentual 0-1</option><option value="duration">Horas / duração</option></select></label>
                   <label className="space-y-1"><span className="form-label">Prefixo</span><input value={draft.valuePrefix} onChange={(event) => patchDraft({ valuePrefix: event.target.value })} className="form-input" placeholder="Ex.: R$" /></label>
                   <label className="space-y-1"><span className="form-label">Sufixo</span><input value={draft.valueSuffix} onChange={(event) => patchDraft({ valueSuffix: event.target.value })} className="form-input" placeholder="Ex.: %" /></label>
                   <label className="space-y-1"><span className="form-label">Decimais</span><input type="number" min={0} max={6} value={draft.valueDecimals} onChange={(event) => patchDraft({ valueDecimals: Number(event.target.value) })} className="form-input" /></label>

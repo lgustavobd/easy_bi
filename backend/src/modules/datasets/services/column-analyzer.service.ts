@@ -24,8 +24,9 @@ export class ColumnAnalyzerService {
     return Object.keys(sample[0] || {}).map((column) => {
       const values = sample.map(r => r[column]).filter(v => v !== null && v !== undefined && String(v).trim() !== '');
       const uniqueCount = new Set(values.map(v => String(v))).size;
-      const dataType = this.detectDataType(column, values);
-      const semanticType = this.detectSemanticType(column, dataType, uniqueCount, values.length);
+      const duration = this.detectDuration(column, values);
+      const dataType = duration ? 'NUMBER' : this.detectDataType(column, values);
+      const semanticType = duration ? 'METRIC' : this.detectSemanticType(column, dataType, uniqueCount, values.length);
       return {
         name: this.normalize(column),
         originalName: column,
@@ -37,7 +38,14 @@ export class ColumnAnalyzerService {
         isNullable: values.length < sample.length,
         uniqueCount,
         sampleValues: values.slice(0, 8),
-        confidence: this.confidence(dataType, semanticType, values.length, sample.length)
+        confidence: duration ? 0.95 : this.confidence(dataType, semanticType, values.length, sample.length),
+        formatConfig: duration ? {
+          type: 'duration',
+          valueKind: 'DURATION',
+          durationUnit: 'seconds',
+          durationInput: duration.input,
+          durationDetectedBy: duration.reason
+        } : undefined
       };
     });
   }
@@ -73,8 +81,37 @@ export class ColumnAnalyzerService {
     return n !== '' && !Number.isNaN(Number(n));
   }
 
+  private detectDuration(column: string, values: any[]) {
+    if (!values.length) return null;
+    const name = column.toLowerCase();
+    const strings = values.map(v => String(v).trim()).filter(Boolean);
+    const durationName = /(hora|horas|tempo|duracao|duraÃ§Ã£o|sla|tma|tme|hh:mm|hms|duration|time|hours?)/i.test(name);
+    const durationTextRate = strings.filter(value => this.isDurationText(value)).length / values.length;
+    const numberRate = strings.filter(value => this.isNumber(value)).length / values.length;
+
+    if (durationTextRate > 0.55) return { input: 'duration_text', reason: 'values' };
+    if (durationName && numberRate > 0.7) {
+      if (/(minuto|minutos|min\b)/i.test(name)) return { input: 'minutes', reason: 'name' };
+      if (/(segundo|segundos|sec\b|seg\b)/i.test(name)) return { input: 'seconds', reason: 'name' };
+      return { input: 'decimal_hours', reason: 'name' };
+    }
+    return null;
+  }
+
+  private isDurationText(value: string) {
+    const text = value.trim().toLowerCase();
+    if (/^-?\d{1,7}:\d{2}(:\d{2})?$/.test(text)) return true;
+    if (/^-?\d+(?:[,.]\d+)?\s*(h|hr|hrs|hora|horas)\b/.test(text)) return true;
+    if (/^-?\d+(?:[,.]\d+)?\s*(m|min|mins|minuto|minutos)\b/.test(text)) return true;
+    if (/^-?\d+\s*h\s*\d{1,2}/.test(text)) return true;
+    return false;
+  }
+
   private isDate(value: string) {
-    return /^\d{4}-\d{2}-\d{2}/.test(value) || /^\d{2}\/\d{2}\/\d{4}/.test(value) || (!Number.isNaN(Date.parse(value)) && /\d/.test(value));
+    const text = String(value || '').trim();
+    if (/^\d{4}-\d{1,2}-\d{1,2}/.test(text)) return true;
+    if (/^\d{1,2}\/\d{1,2}\/(\d{2}|\d{4})(?:\s|$)/.test(text)) return true;
+    return !Number.isNaN(Date.parse(text)) && /\d/.test(text);
   }
 
   private normalize(value: string) {
