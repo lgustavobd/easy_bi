@@ -1,0 +1,17 @@
+<svg width="260" height="72" viewBox="0 0 260 72" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect x="1.5" y="1.5" width="257" height="69" rx="24" fill="url(#bg)" stroke="url(#stroke)" stroke-width="3"/>
+  <g filter="url(#glow)">
+    <rect x="20" y="16" width="40" height="40" rx="14" fill="url(#mark)"/>
+    <path d="M31 45V28H38.4C42.2 28 44.6 29.8 44.6 32.8C44.6 34.4 43.8 35.7 42.4 36.4C44.3 37.1 45.4 38.5 45.4 40.4C45.4 43.4 42.9 45 38.8 45H31ZM35 35H38C39.7 35 40.6 34.3 40.6 33.1C40.6 31.8 39.7 31.2 38 31.2H35V35ZM35 41.8H38.5C40.2 41.8 41.2 41.1 41.2 39.8C41.2 38.5 40.2 37.8 38.5 37.8H35V41.8Z" fill="white"/>
+    <path d="M48 45V28H52V45H48Z" fill="white"/>
+  </g>
+  <text x="74" y="42" font-family="Inter, ui-sans-serif, system-ui" font-size="28" font-weight="800" fill="#18181B">Easy</text>
+  <text x="145" y="42" font-family="Inter, ui-sans-serif, system-ui" font-size="28" font-weight="800" fill="#F97316">BI</text>
+  <text x="181" y="43" font-family="Inter, ui-sans-serif, system-ui" font-size="10" font-weight="700" letter-spacing="2" fill="#71717A">INSIGHTS</text>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="260" y2="72" gradientUnits="userSpaceOnUse"><stop stop-color="#FFFFFF"/><stop offset="1" stop-color="#F4F4F5"/></linearGradient>
+    <linearGradient id="stroke" x1="0" y1="0" x2="260" y2="72" gradientUnits="userSpaceOnUse"><stop stop-color="#FDBA74"/><stop offset="1" stop-color="#E4E4E7"/></linearGradient>
+    <linearGradient id="mark" x1="20" y1="16" x2="60" y2="56" gradientUnits="userSpaceOnUse"><stop stop-color="#FB923C"/><stop offset="1" stop-color="#EA580C"/></linearGradient>
+    <filter id="glow" x="8" y="4" width="64" height="64" filterUnits="userSpaceOnUse"><feGaussianBlur stdDeviation="6"/><feColorMatrix values="0 0 0 0 0.976 0 0 0 0 0.451 0 0 0 0 0.086 0 0 0 0.45 0"/><feBlend in="SourceGraphic"/></filter>
+  </defs>
+</svg>

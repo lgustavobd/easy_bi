@@ -1,0 +1,389 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  BLOCKED
+}
+enum OrganizationStatus {
+  ACTIVE
+  INACTIVE
+  BLOCKED
+}
+enum DatasetStatus {
+  PROCESSING
+  READY
+  FAILED
+  ARCHIVED
+}
+enum FileType {
+  CSV
+  XLSX
+  XLS
+}
+enum DataType {
+  TEXT
+  NUMBER
+  DATE
+  BOOLEAN
+  CURRENCY
+  PERCENTAGE
+}
+enum SemanticType {
+  METRIC
+  DIMENSION
+  TIME_DIMENSION
+  FINANCIAL_METRIC
+  CATEGORY
+  IDENTIFIER
+  DESCRIPTION
+}
+enum DashboardTheme {
+  LIGHT
+  DARK
+  CORPORATE
+}
+enum DashboardStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+enum WidgetType {
+  KPI
+  BAR_CHART
+  LINE_CHART
+  DONUT_CHART
+  TABLE
+  MAP
+}
+enum AggregationType {
+  SUM
+  AVG
+  COUNT
+  MIN
+  MAX
+}
+enum DashboardPermissionType {
+  VIEW
+  EDIT
+  OWNER
+}
+
+model Organization {
+  id String @id @default(uuid()) @db.Char(36)
+  name String @db.VarChar(160)
+  slug String @unique @db.VarChar(120)
+  document String? @db.VarChar(40)
+  status OrganizationStatus @default(ACTIVE)
+  themeConfig Json? @map("theme_config")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+  users UserOrganization[]
+  datasets Dataset[]
+  dashboards Dashboard[]
+  importTemplates ImportTemplate[]
+  auditLogs AuditLog[]
+  datasetRows DatasetRow[]
+  sectors Sector[]
+  userSectors UserSector[]
+  @@map("organizations")
+}
+
+model User {
+  id String @id @default(uuid()) @db.Char(36)
+  name String @db.VarChar(160)
+  email String @unique @db.VarChar(180)
+  passwordHash String @map("password_hash") @db.VarChar(255)
+  status UserStatus @default(ACTIVE)
+  isSuperAdmin Boolean @default(false) @map("is_super_admin")
+  lastLoginAt DateTime? @map("last_login_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+  organizations UserOrganization[]
+  refreshTokens RefreshToken[]
+  datasets Dataset[]
+  dashboards Dashboard[]
+  importTemplates ImportTemplate[]
+  auditLogs AuditLog[]
+  dashboardPerms DashboardPermission[]
+  sectors UserSector[]
+  @@map("users")
+}
+
+model Role {
+  id String @id @default(uuid()) @db.Char(36)
+  name String @db.VarChar(120)
+  code String @unique @db.VarChar(80)
+  description String? @db.VarChar(255)
+  isSystemRole Boolean @default(true) @map("is_system_role")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  permissions RolePermission[]
+  userOrgs UserOrganization[]
+  dashboardPerms DashboardPermission[]
+  @@map("roles")
+}
+
+model Permission {
+  id String @id @default(uuid()) @db.Char(36)
+  name String @db.VarChar(120)
+  code String @unique @db.VarChar(100)
+  description String? @db.VarChar(255)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  roles RolePermission[]
+  @@map("permissions")
+}
+
+model RolePermission {
+  id String @id @default(uuid()) @db.Char(36)
+  roleId String @map("role_id") @db.Char(36)
+  permissionId String @map("permission_id") @db.Char(36)
+  createdAt DateTime @default(now()) @map("created_at")
+  role Role @relation(fields: [roleId], references: [id])
+  permission Permission @relation(fields: [permissionId], references: [id])
+  @@unique([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model UserOrganization {
+  id String @id @default(uuid()) @db.Char(36)
+  userId String @map("user_id") @db.Char(36)
+  organizationId String @map("organization_id") @db.Char(36)
+  roleId String @map("role_id") @db.Char(36)
+  status UserStatus @default(ACTIVE)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  user User @relation(fields: [userId], references: [id])
+  organization Organization @relation(fields: [organizationId], references: [id])
+  role Role @relation(fields: [roleId], references: [id])
+  @@unique([userId, organizationId])
+  @@index([organizationId])
+  @@map("user_organizations")
+}
+
+model RefreshToken {
+  id String @id @default(uuid()) @db.Char(36)
+  userId String @map("user_id") @db.Char(36)
+  tokenHash String @map("token_hash") @db.VarChar(255)
+  expiresAt DateTime @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  createdByIp String? @map("created_by_ip") @db.VarChar(80)
+  userAgent String? @map("user_agent") @db.VarChar(255)
+  user User @relation(fields: [userId], references: [id])
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+
+model Sector {
+  id String @id @default(uuid()) @db.Char(36)
+  organizationId String @map("organization_id") @db.Char(36)
+  name String @db.VarChar(160)
+  code String @db.VarChar(80)
+  description String? @db.VarChar(255)
+  status UserStatus @default(ACTIVE)
+  isDefault Boolean @default(false) @map("is_default")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+  organization Organization @relation(fields: [organizationId], references: [id])
+  userSectors UserSector[]
+  datasets Dataset[]
+  dashboards Dashboard[]
+  importTemplates ImportTemplate[]
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@map("sectors")
+}
+
+model UserSector {
+  id String @id @default(uuid()) @db.Char(36)
+  userId String @map("user_id") @db.Char(36)
+  organizationId String @map("organization_id") @db.Char(36)
+  sectorId String @map("sector_id") @db.Char(36)
+  createdAt DateTime @default(now()) @map("created_at")
+  user User @relation(fields: [userId], references: [id])
+  organization Organization @relation(fields: [organizationId], references: [id])
+  sector Sector @relation(fields: [sectorId], references: [id])
+  @@unique([userId, sectorId])
+  @@index([organizationId, userId])
+  @@index([sectorId])
+  @@map("user_sectors")
+}
+
+model ImportTemplate {
+  id String @id @default(uuid()) @db.Char(36)
+  organizationId String @map("organization_id") @db.Char(36)
+  sectorId String? @map("sector_id") @db.Char(36)
+  createdByUserId String @map("created_by_user_id") @db.Char(36)
+  name String @db.VarChar(180)
+  description String? @db.VarChar(255)
+  columnMapping Json @map("column_mapping")
+  detectedTypes Json @map("detected_types")
+  metrics Json
+  dimensions Json
+  transformationRules Json? @map("transformation_rules")
+  localeConfig Json? @map("locale_config")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+  organization Organization @relation(fields: [organizationId], references: [id])
+  sector Sector? @relation(fields: [sectorId], references: [id])
+  createdBy User @relation(fields: [createdByUserId], references: [id])
+  datasets Dataset[]
+  @@index([organizationId])
+  @@index([sectorId])
+  @@map("import_templates")
+}
+
+model Dataset {
+  id String @id @default(uuid()) @db.Char(36)
+  organizationId String @map("organization_id") @db.Char(36)
+  sectorId String? @map("sector_id") @db.Char(36)
+  createdByUserId String @map("created_by_user_id") @db.Char(36)
+  name String @db.VarChar(180)
+  originalFileName String @map("original_file_name") @db.VarChar(255)
+  fileType FileType @map("file_type")
+  storagePath String? @map("storage_path") @db.VarChar(500)
+  rowCount Int @default(0) @map("row_count")
+  status DatasetStatus @default(PROCESSING)
+  importTemplateId String? @map("import_template_id") @db.Char(36)
+  metadata Json?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+  organization Organization @relation(fields: [organizationId], references: [id])
+  sector Sector? @relation(fields: [sectorId], references: [id])
+  createdBy User @relation(fields: [createdByUserId], references: [id])
+  importTemplate ImportTemplate? @relation(fields: [importTemplateId], references: [id])
+  columns DatasetColumn[]
+  rows DatasetRow[]
+  widgets DashboardWidget[]
+  @@index([organizationId])
+  @@index([sectorId])
+  @@map("datasets")
+}
+
+model DatasetColumn {
+  id String @id @default(uuid()) @db.Char(36)
+  datasetId String @map("dataset_id") @db.Char(36)
+  name String @db.VarChar(160)
+  originalName String @map("original_name") @db.VarChar(160)
+  dataType DataType @map("data_type")
+  semanticType SemanticType @map("semantic_type")
+  isMetric Boolean @default(false) @map("is_metric")
+  isDimension Boolean @default(false) @map("is_dimension")
+  isIdentifier Boolean @default(false) @map("is_identifier")
+  isNullable Boolean @default(true) @map("is_nullable")
+  uniqueCount Int @default(0) @map("unique_count")
+  sampleValues Json? @map("sample_values")
+  formatConfig Json? @map("format_config")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  dataset Dataset @relation(fields: [datasetId], references: [id])
+  @@index([datasetId])
+  @@map("dataset_columns")
+}
+
+model DatasetRow {
+  id String @id @default(uuid()) @db.Char(36)
+  datasetId String @map("dataset_id") @db.Char(36)
+  organizationId String @map("organization_id") @db.Char(36)
+  rowIndex Int @map("row_index")
+  data Json
+  createdAt DateTime @default(now()) @map("created_at")
+  dataset Dataset @relation(fields: [datasetId], references: [id])
+  organization Organization @relation(fields: [organizationId], references: [id])
+  @@index([datasetId])
+  @@index([organizationId])
+  @@map("dataset_rows")
+}
+
+model Dashboard {
+  id String @id @default(uuid()) @db.Char(36)
+  organizationId String @map("organization_id") @db.Char(36)
+  sectorId String? @map("sector_id") @db.Char(36)
+  createdByUserId String @map("created_by_user_id") @db.Char(36)
+  name String @db.VarChar(180)
+  description String? @db.VarChar(255)
+  theme DashboardTheme @default(LIGHT)
+  status DashboardStatus @default(DRAFT)
+  isPublished Boolean @default(false) @map("is_published")
+  layoutConfig Json? @map("layout_config")
+  filterConfig Json? @map("filter_config")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+  organization Organization @relation(fields: [organizationId], references: [id])
+  sector Sector? @relation(fields: [sectorId], references: [id])
+  createdBy User @relation(fields: [createdByUserId], references: [id])
+  widgets DashboardWidget[]
+  permissions DashboardPermission[]
+  @@index([organizationId])
+  @@index([sectorId])
+  @@map("dashboards")
+}
+
+model DashboardWidget {
+  id String @id @default(uuid()) @db.Char(36)
+  dashboardId String @map("dashboard_id") @db.Char(36)
+  datasetId String? @map("dataset_id") @db.Char(36)
+  type WidgetType
+  title String @db.VarChar(180)
+  metricColumn String? @map("metric_column") @db.VarChar(160)
+  dimensionColumn String? @map("dimension_column") @db.VarChar(160)
+  aggregation AggregationType?
+  config Json?
+  positionConfig Json? @map("position_config")
+  styleConfig Json? @map("style_config")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+  dashboard Dashboard @relation(fields: [dashboardId], references: [id])
+  dataset Dataset? @relation(fields: [datasetId], references: [id])
+  @@index([dashboardId])
+  @@map("dashboard_widgets")
+}
+
+model DashboardPermission {
+  id String @id @default(uuid()) @db.Char(36)
+  dashboardId String @map("dashboard_id") @db.Char(36)
+  userId String? @map("user_id") @db.Char(36)
+  roleId String? @map("role_id") @db.Char(36)
+  permissionType DashboardPermissionType @default(VIEW) @map("permission_type")
+  createdAt DateTime @default(now()) @map("created_at")
+  dashboard Dashboard @relation(fields: [dashboardId], references: [id])
+  user User? @relation(fields: [userId], references: [id])
+  role Role? @relation(fields: [roleId], references: [id])
+  @@index([dashboardId])
+  @@map("dashboard_permissions")
+}
+
+model AuditLog {
+  id String @id @default(uuid()) @db.Char(36)
+  organizationId String? @map("organization_id") @db.Char(36)
+  userId String? @map("user_id") @db.Char(36)
+  action String @db.VarChar(120)
+  entity String @db.VarChar(120)
+  entityId String? @map("entity_id") @db.Char(36)
+  metadata Json?
+  ipAddress String? @map("ip_address") @db.VarChar(80)
+  userAgent String? @map("user_agent") @db.VarChar(255)
+  createdAt DateTime @default(now()) @map("created_at")
+  organization Organization? @relation(fields: [organizationId], references: [id])
+  user User? @relation(fields: [userId], references: [id])
+  @@index([organizationId])
+  @@index([userId])
+  @@map("audit_logs")
+}
