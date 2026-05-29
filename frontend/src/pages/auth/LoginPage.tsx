@@ -8,8 +8,8 @@ import { useAuthStore } from '../../store/auth.store';
 export function LoginPage() {
   const navigate = useNavigate();
   const setSession = useAuthStore(s => s.setSession);
-  const [email, setEmail] = useState('superadmin@easybi.com');
-  const [password, setPassword] = useState('EasyBI@123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -204,23 +204,6 @@ export function LoginPage() {
           cursor: not-allowed;
           opacity: 0.68;
           transform: none;
-        }
-
-        .easy-login-credentials {
-          margin: 18px 0 0;
-          border: 1px solid var(--login-line);
-          border-radius: 14px;
-          background: white;
-          padding: 13px 14px;
-          color: var(--login-muted);
-          font-size: 12px;
-          font-weight: 700;
-          line-height: 1.55;
-        }
-
-        .easy-login-credentials strong {
-          color: var(--login-ink);
-          font-weight: 950;
         }
 
         .easy-login-foot {
@@ -604,9 +587,6 @@ export function LoginPage() {
               {!loading && <ArrowRight size={18} />}
             </button>
 
-            <p className="easy-login-credentials">
-              Admin SaaS inicial: <strong>superadmin@easybi.com</strong> / <strong>EasyBI@123</strong>
-            </p>
           </form>
 
           <div className="easy-login-foot">

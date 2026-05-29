@@ -42,13 +42,12 @@ async function main() {
   await grant(editorRole.id, ['dashboard.view', 'dashboard.create', 'dashboard.edit', 'dataset.upload', 'dataset.reprocess']);
   await grant(readerRole.id, ['dashboard.view']);
 
-  const superAdmin = await prisma.user.upsert({
+  await prisma.user.upsert({
     where: { email: 'superadmin@easybi.com' },
     update: { passwordHash, isSuperAdmin: true, status: 'ACTIVE' },
     create: { name: 'Admin SaaS Easy BI', email: 'superadmin@easybi.com', passwordHash, isSuperAdmin: true }
   });
 
   console.log('Seed limpo concluído.');
-  console.log('Admin SaaS:', superAdmin.email, 'Senha: EasyBI@123');
 }
 main().finally(async () => prisma.$disconnect());
