@@ -309,7 +309,7 @@ function TemplatePreviewModal({
             </div>
             <label className="min-w-[260px] max-w-xl flex-1">
               <span className="form-label">Pesquisar no modelo</span>
-              <div className="relative mt-1">
+              <div className="app-search-field app-search-field-compact mt-1">
                 <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
                 <input className="form-input pl-10" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar coluna, metrica ou dimensao..." />
               </div>
@@ -462,10 +462,10 @@ function DatasetPreviewModal({ dataset, onClose }: { dataset: any; onClose: () =
         <section className="data-preview-toolbar">
           <label className="min-w-[220px] flex-1">
             <span className="form-label">Pesquisar</span>
-            <div className="relative mt-1">
-              <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-              <input className="form-input pl-10" value={search} onChange={(event) => updateSearch(event.target.value)} placeholder="Buscar em qualquer valor..." />
-            </div>
+              <div className="app-search-field app-search-field-compact mt-1">
+                <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                <input className="form-input pl-10" value={search} onChange={(event) => updateSearch(event.target.value)} placeholder="Buscar em qualquer valor..." />
+              </div>
           </label>
           <label className="min-w-[220px]">
             <span className="form-label">Coluna</span>
@@ -788,7 +788,7 @@ function TemplateMetricsModal({
               <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(220px,0.75fr)_minmax(240px,0.95fr)_minmax(220px,1fr)]">
                 <label>
                   <span className="form-label">Filtrar datasets</span>
-                  <div className="relative mt-1">
+                  <div className="app-search-field app-search-field-compact mt-1">
                     <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
                     <input className="form-input pl-10" value={datasetSearch} onChange={(event) => setDatasetSearch(event.target.value)} placeholder="Nome, setor ou linhas..." />
                   </div>
@@ -812,7 +812,7 @@ function TemplateMetricsModal({
 
                 <label>
                   <span className="form-label">Buscar campo no dataset</span>
-                  <div className="relative mt-1">
+                  <div className="app-search-field app-search-field-compact mt-1">
                     <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
                     <input className="form-input pl-10" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Ex.: valor, margem, ticket..." />
                   </div>
@@ -1091,7 +1091,7 @@ export function TemplatesPage() {
           </div>
           <label className="min-w-[260px] flex-1 md:max-w-xl">
             <span className="sr-only">Buscar modelos</span>
-            <div className="relative">
+            <div className="app-search-field">
               <Search className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
               <input className="form-input pl-11" value={templateSearch} onChange={(event) => setTemplateSearch(event.target.value)} placeholder="Buscar por modelo, dataset, metrica, setor..." />
             </div>

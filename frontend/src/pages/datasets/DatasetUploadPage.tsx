@@ -129,7 +129,7 @@ function DatasetPreviewModal({ dataset, onClose }: { dataset: any; onClose: () =
         <section className="data-preview-toolbar">
           <label className="min-w-[220px] flex-1">
             <span className="form-label">Pesquisar</span>
-            <div className="relative mt-1">
+            <div className="app-search-field app-search-field-compact mt-1">
               <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
               <input className="form-input pl-10" value={search} onChange={(event) => updateSearch(event.target.value)} placeholder="Buscar em qualquer valor..." />
             </div>
@@ -533,7 +533,7 @@ export function DatasetUploadPage() {
         <div className="card-premium min-w-0 p-5">
           <div className="dataset-list-header">
             <div className="flex items-center gap-3"><h3 className="text-sm font-black uppercase tracking-[0.15em] text-slate-500">Datasets importados</h3><span className="rounded-full bg-primary-soft px-3 py-1 text-xs font-black text-primary">{filteredDatasets.length}/{datasets.length}</span></div>
-            <label className="dataset-list-search">
+            <label className="app-search-field app-search-field-compact dataset-list-search">
               <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
               <input value={datasetSearch} onChange={(event) => setDatasetSearch(event.target.value)} placeholder="Pesquisar dataset, setor ou status..." />
               {datasetSearch && <button type="button" onClick={() => setDatasetSearch('')} aria-label="Limpar busca"><X size={14} /></button>}

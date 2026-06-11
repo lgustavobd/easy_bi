@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from 'react-router-dom';
@@ -6,20 +6,23 @@ import GridLayout, { WidthProvider } from 'react-grid-layout';
 import type { Layout } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
-import { ArrowLeft, BarChart3, CheckCircle2, Database, Edit3, Eye, Grid3X3, LayoutTemplate, LineChart, Loader2, Lock, PieChart, Plus, Save, Send, Table2, Trash2, TrendingUp, Unlock, X } from 'lucide-react';
+import { ArrowLeft, BarChart3, CheckCircle2, Database, Download, Edit3, Eye, Grid3X3, LayoutTemplate, LineChart, Loader2, Lock, PieChart, Plus, Save, Send, Table2, Trash2, TrendingUp, Unlock, X } from 'lucide-react';
 import { api } from '../../api/resources.api';
 import { ChartRenderer, FilterRule, TableColumnFormatConfig } from '../../components/dashboard/ChartRenderer';
 import { DashboardFilterBar } from '../../components/dashboard/DashboardFilterBar';
+import { exportWidgetAsPng } from '../../components/dashboard/export-widget';
 import { useAuthStore } from '../../store/auth.store';
 
 const ResponsiveGridLayout = WidthProvider(GridLayout);
 
 type WidgetType = 'KPI' | 'BAR_CHART' | 'LINE_CHART' | 'DONUT_CHART' | 'TABLE';
+type VisualType = WidgetType | 'AREA_CHART' | 'HORIZONTAL_BAR' | 'PIE_CHART' | 'COMBO_CHART' | 'RADAR_CHART' | 'FUNNEL_CHART' | 'TREEMAP_CHART';
 type Aggregation = 'SUM' | 'AVG' | 'COUNT' | 'DISTINCT_COUNT' | 'MIN' | 'MAX';
 
 type WidgetState = {
   id: string;
   type: WidgetType;
+  visualType: VisualType;
   title: string;
   datasetId: string;
   metricColumn: string;
@@ -38,6 +41,14 @@ type WidgetState = {
   h: number;
   frame?: string;
   locked: boolean;
+};
+
+type WidgetCatalogItem = {
+  type: WidgetType;
+  visualType: VisualType;
+  title: string;
+  description: string;
+  icon: any;
 };
 
 const tableFormatOptions = [
@@ -66,13 +77,30 @@ const aggregationOptions: Array<{ value: Aggregation; label: string; hint: strin
   { value: 'MAX', label: 'Máximo', hint: 'Maior valor encontrado' }
 ];
 
-const widgetCatalog = [
-  { type: 'KPI' as const, title: 'Indicador', description: 'Número executivo para total, média, contagem ou máximo.', icon: TrendingUp },
-  { type: 'BAR_CHART' as const, title: 'Barras', description: 'Comparação entre categorias, produtos, clientes ou status.', icon: BarChart3 },
-  { type: 'LINE_CHART' as const, title: 'Linha', description: 'Evolução temporal por data, mês ou sequência.', icon: LineChart },
-  { type: 'DONUT_CHART' as const, title: 'Donut', description: 'Participação percentual por atributo.', icon: PieChart },
-  { type: 'TABLE' as const, title: 'Tabela', description: 'Detalhamento agregado para conferência.', icon: Table2 }
+const widgetCatalog: WidgetCatalogItem[] = [
+  { type: 'KPI', visualType: 'KPI', title: 'Indicador', description: 'Numero executivo para total, media, contagem ou maximo.', icon: TrendingUp },
+  { type: 'BAR_CHART', visualType: 'BAR_CHART', title: 'Barras', description: 'Comparacao vertical entre categorias, clientes ou status.', icon: BarChart3 },
+  { type: 'BAR_CHART', visualType: 'HORIZONTAL_BAR', title: 'Barras horizontais', description: 'Ranking mais legivel quando os nomes sao longos.', icon: BarChart3 },
+  { type: 'LINE_CHART', visualType: 'LINE_CHART', title: 'Linha', description: 'Evolucao temporal por data, mes ou sequencia.', icon: LineChart },
+  { type: 'LINE_CHART', visualType: 'AREA_CHART', title: 'Area', description: 'Tendencia com volume preenchido para dar mais presenca.', icon: LineChart },
+  { type: 'BAR_CHART', visualType: 'COMBO_CHART', title: 'Combo', description: 'Barra e linha juntas para comparar valor e tendencia.', icon: LineChart },
+  { type: 'DONUT_CHART', visualType: 'DONUT_CHART', title: 'Donut', description: 'Participacao percentual por atributo.', icon: PieChart },
+  { type: 'DONUT_CHART', visualType: 'PIE_CHART', title: 'Pizza', description: 'Divisao cheia para composicao simples.', icon: PieChart },
+  { type: 'DONUT_CHART', visualType: 'RADAR_CHART', title: 'Radar', description: 'Compara ate 12 grupos em uma leitura radial.', icon: PieChart },
+  { type: 'DONUT_CHART', visualType: 'FUNNEL_CHART', title: 'Funil', description: 'Mostra queda ou concentracao entre etapas/categorias.', icon: BarChart3 },
+  { type: 'DONUT_CHART', visualType: 'TREEMAP_CHART', title: 'Mapa de arvore', description: 'Blocos proporcionais para ver peso por categoria.', icon: Grid3X3 },
+  { type: 'TABLE', visualType: 'TABLE', title: 'Tabela', description: 'Detalhamento agregado para conferencia.', icon: Table2 }
 ];
+
+function widgetVisualType(widget: Pick<WidgetState, 'type' | 'visualType'>) {
+  return widget.visualType || widget.type;
+}
+
+function catalogItemForWidget(widget: Pick<WidgetState, 'type' | 'visualType'>) {
+  return widgetCatalog.find((item) => item.type === widget.type && item.visualType === widgetVisualType(widget))
+    || widgetCatalog.find((item) => item.type === widget.type)
+    || widgetCatalog[1];
+}
 
 const presetFrames = [
   {
@@ -229,6 +257,7 @@ function widgetFactory(type: WidgetType, partial: Partial<WidgetState> = {}): Wi
   return {
     id: partial.id || `tmp-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     type,
+    visualType: partial.visualType || type,
     title: partial.title || 'Novo componente',
     datasetId: partial.datasetId || '',
     metricColumn: partial.metricColumn || '',
@@ -255,6 +284,7 @@ function normalizeWidget(widget: any, dashboardDataset: any): WidgetState {
   const config = (widget.config || {}) as any;
   return widgetFactory(widget.type || 'BAR_CHART', {
     id: widget.id,
+    visualType: config.visualType || widget.type || 'BAR_CHART',
     title: widget.title || 'Componente',
     datasetId: dashboardDataset?.id || widget.datasetId || '',
     metricColumn: widget.metricColumn || firstMetric(dashboardDataset),
@@ -286,6 +316,7 @@ function widgetPayload(widget: WidgetState, datasetId: string) {
     aggregation: widget.aggregation,
     config: {
       showLegend: widget.showLegend,
+      visualType: widget.visualType !== widget.type ? widget.visualType : undefined,
       tableColumns: widget.type === 'TABLE' ? (widget.tableColumns?.length ? widget.tableColumns : [widget.dimensionColumn, widget.metricColumn].filter(Boolean)) : undefined,
       tableColumnFormats: widget.type === 'TABLE' ? cleanTableColumnFormats(widget.tableColumnFormats, widget.tableColumns) : undefined,
       valueFormat: widget.valueFormat,
@@ -327,9 +358,10 @@ function canEditDashboard(user: any, organization: any) {
   return Boolean(user?.isSuperAdmin || role === 'SUPER_ADMIN' || role === 'ORG_ADMIN' || role === 'EDITOR');
 }
 
-function WidgetCard({ widget, filters, onEdit, onRemove, onSelect, onToggleLock, selected }: { widget: WidgetState; filters: FilterRule[]; selected: boolean; onEdit: () => void; onRemove: () => void; onSelect: () => void; onToggleLock: () => void }) {
+function WidgetCard({ widget, dataset, filters, onEdit, onRemove, onSelect, onToggleLock, selected }: { widget: WidgetState; dataset: any; filters: FilterRule[]; selected: boolean; onEdit: () => void; onRemove: () => void; onSelect: () => void; onToggleLock: () => void }) {
+  const cardRef = useRef<HTMLElement | null>(null);
   const { data, isFetching } = useQuery({
-    queryKey: ['dashboard-preview', widget.datasetId, widget.metricColumn, widget.dimensionColumn, JSON.stringify(widget.tableColumns || []), widget.aggregation, widget.type, JSON.stringify(filters)],
+    queryKey: ['dashboard-preview', widget.datasetId, widget.metricColumn, widget.dimensionColumn, JSON.stringify(widget.tableColumns || []), widget.aggregation, widget.type, widgetVisualType(widget), JSON.stringify(filters)],
     queryFn: () => api.dashboards.previewData({
       datasetId: widget.datasetId,
       metricColumn: widget.metricColumn,
@@ -344,7 +376,7 @@ function WidgetCard({ widget, filters, onEdit, onRemove, onSelect, onToggleLock,
   });
 
   return (
-    <article onClick={onSelect} onDoubleClick={(event) => { event.stopPropagation(); onSelect(); onEdit(); }} className={`dashboard-widget h-full ${selected ? 'dashboard-widget-selected' : ''} ${widget.locked ? 'dashboard-widget-locked' : ''}`}>
+    <article ref={cardRef} onClick={onSelect} onDoubleClick={(event) => { event.stopPropagation(); onSelect(); onEdit(); }} className={`dashboard-widget h-full ${selected ? 'dashboard-widget-selected' : ''} ${widget.locked ? 'dashboard-widget-locked' : ''}`}>
       <div className={`drag-handle flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3 ${widget.locked ? 'cursor-not-allowed' : 'cursor-move'}`}>
         <div className="min-w-0">
           <div className="flex items-center gap-2">
@@ -355,12 +387,13 @@ function WidgetCard({ widget, filters, onEdit, onRemove, onSelect, onToggleLock,
         </div>
         <div className="no-drag flex items-center gap-1">
           <button title={widget.locked ? 'Destravar posição e tamanho' : 'Travar posição e tamanho'} onClick={(event) => { event.stopPropagation(); onToggleLock(); }} className={`rounded-xl border px-2.5 py-2 text-xs font-black transition ${widget.locked ? 'border-primary bg-primary-soft text-primary' : 'border-slate-200 bg-white text-slate-500 hover:border-primary hover:bg-primary-soft hover:text-primary'}`}>{widget.locked ? <Lock size={14} /> : <Unlock size={14} />}</button>
+          <button title="Exportar grafico" onClick={(event) => { event.stopPropagation(); exportWidgetAsPng(cardRef.current, widget, dataset, filters); }} className="rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-xs font-black text-slate-600 hover:border-primary hover:bg-primary-soft hover:text-primary"><Download size={14} /></button>
           <button title="Editar gráfico" onClick={(event) => { event.stopPropagation(); onSelect(); onEdit(); }} className="rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-xs font-black text-slate-600 hover:border-primary hover:bg-primary-soft hover:text-primary"><Edit3 size={14} /></button>
           <button onClick={(event) => { event.stopPropagation(); onRemove(); }} className="rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-xs font-black text-slate-400 hover:border-red-200 hover:bg-red-50 hover:text-red-600"><Trash2 size={14} /></button>
         </div>
       </div>
       <div className="h-[calc(100%-58px)] p-4">
-        <ChartRenderer type={widget.type} metric={widget.metricColumn} dimension={widget.dimensionColumn} showLegend={widget.showLegend} formatConfig={{ type: widget.valueFormat, prefix: widget.valuePrefix, suffix: widget.valueSuffix, decimals: widget.valueDecimals }} tableColumnFormats={widget.tableColumnFormats} data={data} loading={isFetching} />
+        <ChartRenderer type={widgetVisualType(widget)} metric={widget.metricColumn} dimension={widget.dimensionColumn} showLegend={widget.showLegend} formatConfig={{ type: widget.valueFormat, prefix: widget.valuePrefix, suffix: widget.valueSuffix, decimals: widget.valueDecimals }} tableColumnFormats={widget.tableColumnFormats} data={data} loading={isFetching} />
       </div>
       <div className="resize-helper">{widget.locked ? 'posição travada' : 'arraste a borda para redimensionar'}</div>
     </article>
@@ -373,10 +406,10 @@ function WidgetEditorModal({ widget, dataset, filters, onClose, onSave }: { widg
   const dimensions = dimensionColumns(dataset);
   const tableSelectableColumns = getColumns(dataset);
   const selectedFormattableTableColumns = tableSelectableColumns.filter((column: any) => (draft.tableColumns || []).includes(column.name) && isFormattableTableColumn(column));
-  const selectedType = widgetCatalog.find((item) => item.type === draft.type) || widgetCatalog[1];
+  const selectedType = catalogItemForWidget(draft);
   const SelectedIcon = selectedType.icon;
   const { data: previewData, isFetching: previewLoading } = useQuery({
-    queryKey: ['dashboard-edit-preview', dataset?.id, draft.type, draft.metricColumn, draft.dimensionColumn, JSON.stringify(draft.tableColumns || []), draft.aggregation, JSON.stringify(filters)],
+    queryKey: ['dashboard-edit-preview', dataset?.id, draft.type, widgetVisualType(draft), draft.metricColumn, draft.dimensionColumn, JSON.stringify(draft.tableColumns || []), draft.aggregation, JSON.stringify(filters)],
     queryFn: () => api.dashboards.previewData({
       datasetId: dataset?.id || draft.datasetId,
       metricColumn: draft.metricColumn,
@@ -444,9 +477,11 @@ function WidgetEditorModal({ widget, dataset, filters, onClose, onSave }: { widg
     });
   }
 
-  function changeType(type: WidgetType) {
+  function changeType(item: WidgetCatalogItem) {
+    const type = item.type;
     patchDraft({
       type,
+      visualType: item.visualType,
       tableColumns: type === 'TABLE' ? (draft.tableColumns?.length ? draft.tableColumns : defaultTableColumns(dataset)) : draft.tableColumns,
       showLegend: type !== 'KPI' && type !== 'TABLE',
       w: type === 'KPI' ? Math.max(3, Math.min(draft.w, 4)) : Math.max(draft.w, 5),
@@ -494,7 +529,7 @@ function WidgetEditorModal({ widget, dataset, filters, onClose, onSave }: { widg
               {draft.locked && <span className="lock-badge"><Lock size={11} /> travado</span>}
             </div>
             <div className="h-[260px] p-4">
-              <ChartRenderer type={draft.type} metric={draft.metricColumn} dimension={draft.dimensionColumn} showLegend={draft.showLegend} formatConfig={{ type: draft.valueFormat, prefix: draft.valuePrefix, suffix: draft.valueSuffix, decimals: draft.valueDecimals }} tableColumnFormats={draft.tableColumnFormats} data={previewData} loading={previewLoading} />
+              <ChartRenderer type={widgetVisualType(draft)} metric={draft.metricColumn} dimension={draft.dimensionColumn} showLegend={draft.showLegend} formatConfig={{ type: draft.valueFormat, prefix: draft.valuePrefix, suffix: draft.valueSuffix, decimals: draft.valueDecimals }} tableColumnFormats={draft.tableColumnFormats} data={previewData} loading={previewLoading} />
             </div>
           </section>
 
@@ -503,9 +538,9 @@ function WidgetEditorModal({ widget, dataset, filters, onClose, onSave }: { widg
             <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
               {widgetCatalog.map((item) => {
                 const Icon = item.icon;
-                const active = draft.type === item.type;
+                const active = draft.type === item.type && widgetVisualType(draft) === item.visualType;
                 return (
-                  <button type="button" key={item.type} onClick={() => changeType(item.type)} className={`chart-type-card chart-type-card-compact ${active ? 'chart-type-card-active' : ''}`}>
+                  <button type="button" key={item.visualType} onClick={() => changeType(item)} className={`chart-type-card chart-type-card-compact ${active ? 'chart-type-card-active' : ''}`}>
                     <Icon size={20} />
                     <span className="font-black">{item.title}</span>
                     <small>{item.description}</small>
@@ -713,14 +748,16 @@ export function DashboardBuilderPage() {
     setStatus('Editando gráfico. Altere as opções no popup e clique em Aplicar alterações.');
   }
 
-  function addWidget(type: WidgetType) {
+  function addWidget(item: WidgetCatalogItem) {
+    const type = item.type;
     const defaultWidth = type === 'KPI' ? 3 : 6;
     const defaultHeight = type === 'KPI' ? 4 : 8;
     const position = findBestWidgetPosition(widgets, defaultWidth, defaultHeight);
     const next = widgetFactory(type, {
       ...buildBase(),
+      visualType: item.visualType,
       tableColumns: type === 'TABLE' ? defaultTableColumns(selectedDataset) : [],
-      title: widgetCatalog.find((item) => item.type === type)?.title || 'Componente',
+      title: item.title || 'Componente',
       ...position
     });
     setWidgets((current) => [...current, next]);
@@ -831,7 +868,7 @@ export function DashboardBuilderPage() {
         </div>
         <div className="card-premium p-5">
           <div className="flex items-center gap-3"><div className="rounded-xl bg-primary-soft p-2.5 text-primary"><Plus size={18} /></div><div><p className="font-black text-slate-950">Adicionar quadro</p><p className="text-xs font-medium text-slate-500">Cada item abre um popup didático de configuração.</p></div></div>
-          <div className="mt-4 grid grid-cols-2 gap-2 lg:grid-cols-5">{widgetCatalog.map((item) => { const Icon = item.icon; return <button key={item.type} onClick={() => addWidget(item.type)} className="rounded-2xl border border-slate-200 bg-white p-3 text-left transition hover:border-primary hover:bg-primary-soft"><Icon size={18} className="text-primary" /><p className="mt-2 text-xs font-black text-slate-800">{item.title}</p></button>; })}</div>
+          <div className="mt-4 grid grid-cols-2 gap-2 lg:grid-cols-4">{widgetCatalog.map((item) => { const Icon = item.icon; return <button key={item.visualType} onClick={() => addWidget(item)} className="rounded-2xl border border-slate-200 bg-white p-3 text-left transition hover:border-primary hover:bg-primary-soft"><Icon size={18} className="text-primary" /><p className="mt-2 text-xs font-black text-slate-800">{item.title}</p></button>; })}</div>
         </div>
       </section>
 
@@ -845,7 +882,7 @@ export function DashboardBuilderPage() {
           <div className="flex flex-wrap items-center gap-2"><span className="inline-flex items-center gap-2 text-xs font-black text-slate-400"><Lock size={14} /> Dataset único · filtros globais · sem sobreposição</span><button type="button" disabled={!selectedWidgetId} onClick={() => selectedWidgetId && openWidgetEditor(selectedWidgetId)} className="btn-muted px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"><Edit3 size={14} /> Editar selecionado</button></div>
         </div>
         <ResponsiveGridLayout className="layout" cols={12} rowHeight={36} margin={[16, 16]} containerPadding={[0, 0]} layout={layout} onLayoutChange={handleLayoutChange} compactType={null} preventCollision isBounded draggableHandle=".drag-handle" draggableCancel=".no-drag" resizeHandles={['se']}>
-          {widgets.map((widget) => <div key={widget.id}><WidgetCard widget={{ ...widget, datasetId: selectedDataset?.id || widget.datasetId }} filters={selectedFilters} selected={selectedWidgetId === widget.id} onSelect={() => setSelectedWidgetId(widget.id)} onEdit={() => openWidgetEditor(widget.id)} onToggleLock={() => updateWidget(widget.id, { locked: !widget.locked })} onRemove={() => removeWidget(widget.id)} /></div>)}
+          {widgets.map((widget) => <div key={widget.id}><WidgetCard widget={{ ...widget, datasetId: selectedDataset?.id || widget.datasetId }} dataset={selectedDataset} filters={selectedFilters} selected={selectedWidgetId === widget.id} onSelect={() => setSelectedWidgetId(widget.id)} onEdit={() => openWidgetEditor(widget.id)} onToggleLock={() => updateWidget(widget.id, { locked: !widget.locked })} onRemove={() => removeWidget(widget.id)} /></div>)}
         </ResponsiveGridLayout>
       </section>
 

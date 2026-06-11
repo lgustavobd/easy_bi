@@ -1,4 +1,4 @@
-import { Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, ComposedChart, Funnel, FunnelChart, LabelList, Legend, Line, LineChart, Pie, PieChart, PolarAngleAxis, PolarGrid, PolarRadiusAxis, Radar, RadarChart, ResponsiveContainer, Tooltip, Treemap, XAxis, YAxis } from 'recharts';
 
 export type FilterRule = {
   id: string;
@@ -215,6 +215,25 @@ function EmptyState({ message }: { message: string }) {
   );
 }
 
+function TreemapContent(props: any) {
+  const { x, y, width, height, name, value, index } = props;
+  const fill = palette[Math.abs(Number(index || 0)) % palette.length];
+  if (width <= 0 || height <= 0) return null;
+  return (
+    <g>
+      <rect x={x} y={y} width={width} height={height} rx={10} ry={10} fill={fill} />
+      {width > 86 && height > 42 && (
+        <>
+          <text x={x + 12} y={y + 24} fill="#0f172a" fontSize={12} fontWeight={800}>
+            {String(name || '').slice(0, Math.max(8, Math.floor(width / 9)))}
+          </text>
+          {height > 68 && <text x={x + 12} y={y + 46} fill="#334155" fontSize={11} fontWeight={700}>{Number(value || 0).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}</text>}
+        </>
+      )}
+    </g>
+  );
+}
+
 export function ChartRenderer({ type, metric, dimension, showLegend = true, formatConfig, tableColumnFormats, data, loading, emptyMessage }: ChartRendererProps) {
   if (loading) return <Skeleton />;
 
@@ -223,6 +242,10 @@ export function ChartRenderer({ type, metric, dimension, showLegend = true, form
   const valueFormatConfig = formatConfig?.type && formatConfig.type !== 'auto' ? formatConfig : data?.formatConfig || formatConfig;
   const metricLabel = prettify(metric);
   const dimensionLabel = prettify(dimension);
+  const compositionRows = rows
+    .slice(0, 18)
+    .map((row, index) => ({ ...row, value: Math.abs(Number(row.value || 0)), fill: palette[index % palette.length] }))
+    .filter((row) => Number.isFinite(row.value));
 
   if (!data || (!rows.length && type !== 'KPI')) {
     return <EmptyState message={emptyMessage || 'Selecione dataset, métrica e atributo para montar a visualização.'} />;
@@ -256,16 +279,92 @@ export function ChartRenderer({ type, metric, dimension, showLegend = true, form
     );
   }
 
-  if (type === 'DONUT_CHART') {
+  if (type === 'AREA_CHART') {
+    return (
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart data={rows} margin={{ top: 10, right: 12, bottom: 0, left: 0 }}>
+          <defs>
+            <linearGradient id="easyAreaFill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor="var(--easy-primary)" stopOpacity={0.35} />
+              <stop offset="95%" stopColor="var(--easy-primary)" stopOpacity={0.03} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+          <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#64748b' }} interval="preserveStartEnd" />
+          <YAxis tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={(value) => formatAxisTick(metric, value, valueFormatConfig)} />
+          <Tooltip formatter={(value: number) => formatValue(metric, value, valueFormatConfig)} labelFormatter={(value) => `${dimensionLabel}: ${value}`} />
+          {showLegend && <Legend verticalAlign="bottom" height={26} />}
+          <Area name={metricLabel} type="monotone" dataKey="value" stroke="var(--easy-primary)" strokeWidth={3} fill="url(#easyAreaFill)" />
+        </AreaChart>
+      </ResponsiveContainer>
+    );
+  }
+
+  if (type === 'COMBO_CHART') {
+    return (
+      <ResponsiveContainer width="100%" height="100%">
+        <ComposedChart data={rows} margin={{ top: 10, right: 12, bottom: 0, left: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+          <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#64748b' }} interval="preserveStartEnd" />
+          <YAxis tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={(value) => formatAxisTick(metric, value, valueFormatConfig)} />
+          <Tooltip formatter={(value: number) => formatValue(metric, value, valueFormatConfig)} labelFormatter={(value) => `${dimensionLabel}: ${value}`} />
+          {showLegend && <Legend verticalAlign="bottom" height={26} />}
+          <Bar name={`${metricLabel} em barras`} dataKey="value" fill="var(--easy-primary-2)" fillOpacity={0.48} radius={[8, 8, 0, 0]} />
+          <Line name={`${metricLabel} em linha`} type="monotone" dataKey="value" stroke="var(--easy-primary)" strokeWidth={3} dot={{ r: 3 }} />
+        </ComposedChart>
+      </ResponsiveContainer>
+    );
+  }
+
+  if (type === 'DONUT_CHART' || type === 'PIE_CHART') {
     return (
       <ResponsiveContainer width="100%" height="100%">
         <PieChart>
           <Tooltip formatter={(value: number) => formatValue(metric, value, valueFormatConfig)} />
           {showLegend && <Legend verticalAlign="bottom" height={32} />}
-          <Pie data={rows} dataKey="value" nameKey="name" innerRadius="50%" outerRadius="76%" paddingAngle={2}>
+          <Pie data={rows} dataKey="value" nameKey="name" innerRadius={type === 'PIE_CHART' ? 0 : '50%'} outerRadius="76%" paddingAngle={2}>
             {rows.map((_, index) => <Cell key={index} fill={palette[index % palette.length]} />)}
           </Pie>
         </PieChart>
+      </ResponsiveContainer>
+    );
+  }
+
+  if (type === 'RADAR_CHART') {
+    return (
+      <ResponsiveContainer width="100%" height="100%">
+        <RadarChart data={compositionRows.slice(0, 12)} margin={{ top: 12, right: 24, bottom: 12, left: 24 }}>
+          <PolarGrid stroke="#e2e8f0" />
+          <PolarAngleAxis dataKey="name" tick={{ fontSize: 10, fill: '#64748b' }} />
+          <PolarRadiusAxis tick={{ fontSize: 10, fill: '#94a3b8' }} tickFormatter={(value) => formatAxisTick(metric, value, valueFormatConfig)} />
+          <Tooltip formatter={(value: number) => formatValue(metric, value, valueFormatConfig)} />
+          {showLegend && <Legend verticalAlign="bottom" height={26} />}
+          <Radar name={metricLabel} dataKey="value" stroke="var(--easy-primary)" fill="var(--easy-primary)" fillOpacity={0.22} strokeWidth={3} />
+        </RadarChart>
+      </ResponsiveContainer>
+    );
+  }
+
+  if (type === 'FUNNEL_CHART') {
+    return (
+      <ResponsiveContainer width="100%" height="100%">
+        <FunnelChart margin={{ top: 12, right: 22, bottom: 12, left: 22 }}>
+          <Tooltip formatter={(value: number) => formatValue(metric, value, valueFormatConfig)} />
+          <Funnel data={compositionRows.slice(0, 10)} dataKey="value" nameKey="name" isAnimationActive>
+            <LabelList position="right" fill="#334155" stroke="none" dataKey="name" fontSize={11} fontWeight={800} />
+            {compositionRows.slice(0, 10).map((_, index) => <Cell key={index} fill={palette[index % palette.length]} />)}
+          </Funnel>
+        </FunnelChart>
+      </ResponsiveContainer>
+    );
+  }
+
+  if (type === 'TREEMAP_CHART') {
+    return (
+      <ResponsiveContainer width="100%" height="100%">
+        <Treemap data={compositionRows} dataKey="value" nameKey="name" stroke="transparent" content={<TreemapContent />}>
+          <Tooltip formatter={(value: number) => formatValue(metric, value, valueFormatConfig)} />
+        </Treemap>
       </ResponsiveContainer>
     );
   }
@@ -312,6 +411,21 @@ export function ChartRenderer({ type, metric, dimension, showLegend = true, form
           </tbody>
         </table>
       </div>
+    );
+  }
+
+  if (type === 'HORIZONTAL_BAR') {
+    return (
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={rows} layout="vertical" margin={{ top: 10, right: 18, bottom: 0, left: 18 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+          <XAxis type="number" tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={(value) => formatAxisTick(metric, value, valueFormatConfig)} />
+          <YAxis type="category" dataKey="name" width={90} tick={{ fontSize: 11, fill: '#64748b' }} />
+          <Tooltip formatter={(value: number) => formatValue(metric, value, valueFormatConfig)} labelFormatter={(value) => `${dimensionLabel}: ${value}`} />
+          {showLegend && <Legend verticalAlign="bottom" height={26} />}
+          <Bar name={metricLabel} dataKey="value" fill="var(--easy-primary)" radius={[0, 8, 8, 0]} />
+        </BarChart>
+      </ResponsiveContainer>
     );
   }
 

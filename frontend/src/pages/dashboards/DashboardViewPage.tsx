@@ -1,14 +1,15 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 import GridLayout, { WidthProvider } from 'react-grid-layout';
 import type { Layout } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
-import { ArrowLeft, Database, Edit3, Loader2, Maximize2 } from 'lucide-react';
+import { ArrowLeft, Database, Download, Edit3, Loader2, Maximize2 } from 'lucide-react';
 import { api } from '../../api/resources.api';
 import { ChartRenderer, FilterRule } from '../../components/dashboard/ChartRenderer';
 import { DashboardFilterBar } from '../../components/dashboard/DashboardFilterBar';
+import { exportWidgetAsPng } from '../../components/dashboard/export-widget';
 import { useAuthStore } from '../../store/auth.store';
 
 const ResponsiveGridLayout = WidthProvider(GridLayout);
@@ -36,6 +37,7 @@ function normalizeWidget(widget: any, dataset: any) {
   return {
     id: widget.id,
     type: widget.type || 'BAR_CHART',
+    visualType: config.visualType || widget.type || 'BAR_CHART',
     title: widget.title || 'Componente',
     datasetId: dataset?.id || widget.datasetId || '',
     metricColumn: widget.metricColumn || firstMetric(dataset),
@@ -55,9 +57,11 @@ function normalizeWidget(widget: any, dataset: any) {
   };
 }
 
-function WidgetView({ widget, filters }: { widget: any; filters: FilterRule[] }) {
+function WidgetView({ widget, dataset, filters }: { widget: any; dataset: any; filters: FilterRule[] }) {
+  const cardRef = useRef<HTMLElement | null>(null);
+  const visualType = widget.visualType || widget.type;
   const { data, isFetching } = useQuery({
-    queryKey: ['dashboard-view-widget', widget.id, widget.datasetId, widget.metricColumn, widget.dimensionColumn, JSON.stringify(widget.tableColumns || []), widget.aggregation, widget.type, JSON.stringify(filters)],
+    queryKey: ['dashboard-view-widget', widget.id, widget.datasetId, widget.metricColumn, widget.dimensionColumn, JSON.stringify(widget.tableColumns || []), widget.aggregation, widget.type, visualType, JSON.stringify(filters)],
     queryFn: () => api.dashboards.previewData({
       datasetId: widget.datasetId,
       metricColumn: widget.metricColumn,
@@ -72,16 +76,19 @@ function WidgetView({ widget, filters }: { widget: any; filters: FilterRule[] })
   });
 
   return (
-    <article className="dashboard-widget-view h-full">
+    <article ref={cardRef} className="dashboard-widget-view h-full">
       <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
         <div className="min-w-0">
           <p className="truncate font-black text-slate-950">{widget.title}</p>
           <p className="truncate text-[11px] font-semibold text-slate-400">{widget.aggregation} · {widget.metricColumn || 'métrica'} {widget.type !== 'KPI' && `por ${widget.dimensionColumn || 'atributo'}`}</p>
         </div>
-        <span className="rounded-full bg-primary-soft px-2 py-1 text-[10px] font-bold text-primary">{widget.type}</span>
+        <div className="flex items-center gap-2">
+          <button title="Exportar grafico" onClick={() => exportWidgetAsPng(cardRef.current, widget, dataset, filters)} className="rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-xs font-black text-slate-600 hover:border-primary hover:bg-primary-soft hover:text-primary"><Download size={14} /></button>
+          <span className="rounded-full bg-primary-soft px-2 py-1 text-[10px] font-bold text-primary">{visualType}</span>
+        </div>
       </div>
       <div className="h-[calc(100%-62px)] p-4">
-        <ChartRenderer type={widget.type} metric={widget.metricColumn} dimension={widget.dimensionColumn} showLegend={widget.showLegend} formatConfig={{ type: widget.valueFormat, prefix: widget.valuePrefix, suffix: widget.valueSuffix, decimals: widget.valueDecimals }} tableColumnFormats={widget.tableColumnFormats} data={data} loading={isFetching} />
+        <ChartRenderer type={visualType} metric={widget.metricColumn} dimension={widget.dimensionColumn} showLegend={widget.showLegend} formatConfig={{ type: widget.valueFormat, prefix: widget.valuePrefix, suffix: widget.valueSuffix, decimals: widget.valueDecimals }} tableColumnFormats={widget.tableColumnFormats} data={data} loading={isFetching} />
       </div>
     </article>
   );
@@ -149,7 +156,7 @@ export function DashboardViewPage() {
           <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-8 text-center text-sm font-bold text-slate-500">Esse dashboard ainda não possui gráficos salvos.</div>
         ) : (
           <ResponsiveGridLayout className="layout" cols={12} rowHeight={36} margin={[16, 16]} containerPadding={[0, 0]} layout={layout} compactType={null} preventCollision isDraggable={false} isResizable={false}>
-            {widgets.map((widget: any) => <div key={widget.id}><WidgetView widget={widget} filters={datasetFilters} /></div>)}
+            {widgets.map((widget: any) => <div key={widget.id}><WidgetView widget={widget} dataset={dataset} filters={datasetFilters} /></div>)}
           </ResponsiveGridLayout>
         )}
       </section>

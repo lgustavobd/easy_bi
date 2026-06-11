@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Edit3, KeyRound, Layers3, Save, ShieldCheck, Trash2, UserPlus, Users, X } from 'lucide-react';
+import { Edit3, KeyRound, Layers3, Save, Search, ShieldCheck, Trash2, UserPlus, Users, X } from 'lucide-react';
 import { api } from '../../api/resources.api';
 import { useAuthStore } from '../../store/auth.store';
 
@@ -349,13 +349,16 @@ export function UsersPage() {
                 <Users className="text-primary" />
               </div>
             </div>
-            <div className="mt-4">
-              <input
-                className="input"
-                placeholder="Filtrar por nome, e-mail, org, perfil, setor ou status"
-                value={userFilter}
-                onChange={e => setUserFilter(e.target.value)}
-              />
+            <div className="app-search-shell app-search-shell-compact mt-4">
+              <div className="app-search-icon"><Search size={18} /></div>
+              <label className="app-search-field">
+                <span className="sr-only">Filtrar usuarios</span>
+                <input
+                  placeholder="Filtrar por nome, e-mail, org, perfil, setor ou status"
+                  value={userFilter}
+                  onChange={e => setUserFilter(e.target.value)}
+                />
+              </label>
             </div>
           </div>
           <div className="overflow-auto">

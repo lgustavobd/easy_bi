@@ -274,7 +274,7 @@ export function AppearancePage() {
               </div>
             </div>
             <div className="flex w-full flex-col gap-3 lg:w-auto lg:flex-row">
-              <label className="relative min-w-[260px]">
+              <label className="app-search-field app-search-field-compact min-w-[260px]">
                 <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
                 <input
                   value={query}
