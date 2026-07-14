@@ -33,6 +33,7 @@ export type TableColumnFormatConfig = Record<string, ValueFormatConfig | undefin
 type ChartRendererProps = {
   type: string;
   metric?: string;
+  secondaryMetric?: string;
   dimension?: string;
   showLegend?: boolean;
   formatConfig?: ValueFormatConfig;
@@ -234,14 +235,16 @@ function TreemapContent(props: any) {
   );
 }
 
-export function ChartRenderer({ type, metric, dimension, showLegend = true, formatConfig, tableColumnFormats, data, loading, emptyMessage }: ChartRendererProps) {
+export function ChartRenderer({ type, metric, secondaryMetric, dimension, showLegend = true, formatConfig, tableColumnFormats, data, loading, emptyMessage }: ChartRendererProps) {
   if (loading) return <Skeleton />;
 
   const rows = data?.rows || [];
   const total = Number(data?.value || rows.reduce((acc, item) => acc + Number(item.value || 0), 0));
   const valueFormatConfig = formatConfig?.type && formatConfig.type !== 'auto' ? formatConfig : data?.formatConfig || formatConfig;
   const metricLabel = prettify(metric);
+  const secondaryMetricLabel = prettify(secondaryMetric);
   const dimensionLabel = prettify(dimension);
+  const hasSecondaryValues = rows.some((row) => row.secondaryValue !== undefined && row.secondaryValue !== null);
   const compositionRows = rows
     .slice(0, 18)
     .map((row, index) => ({ ...row, value: Math.abs(Number(row.value || 0)), fill: palette[index % palette.length] }))
@@ -306,11 +309,18 @@ export function ChartRenderer({ type, metric, dimension, showLegend = true, form
         <ComposedChart data={rows} margin={{ top: 10, right: 12, bottom: 0, left: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
           <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#64748b' }} interval="preserveStartEnd" />
-          <YAxis tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={(value) => formatAxisTick(metric, value, valueFormatConfig)} />
-          <Tooltip formatter={(value: number) => formatValue(metric, value, valueFormatConfig)} labelFormatter={(value) => `${dimensionLabel}: ${value}`} />
+          <YAxis yAxisId="left" tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={(value) => formatAxisTick(metric, value, valueFormatConfig)} />
+          {hasSecondaryValues && <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={(value) => formatAxisTick(secondaryMetric, value, valueFormatConfig)} />}
+          <Tooltip
+            formatter={(value: any, _name: any, item: any) => {
+              const isSecondary = item?.dataKey === 'secondaryValue';
+              return [formatValue(isSecondary ? secondaryMetric : metric, Number(value || 0), valueFormatConfig), isSecondary ? secondaryMetricLabel : metricLabel];
+            }}
+            labelFormatter={(value) => `${dimensionLabel}: ${value}`}
+          />
           {showLegend && <Legend verticalAlign="bottom" height={26} />}
-          <Bar name={`${metricLabel} em barras`} dataKey="value" fill="var(--easy-primary-2)" fillOpacity={0.48} radius={[8, 8, 0, 0]} />
-          <Line name={`${metricLabel} em linha`} type="monotone" dataKey="value" stroke="var(--easy-primary)" strokeWidth={3} dot={{ r: 3 }} />
+          <Bar yAxisId="left" name={metricLabel} dataKey="value" fill="var(--easy-primary-2)" fillOpacity={0.48} radius={[8, 8, 0, 0]} />
+          <Line yAxisId={hasSecondaryValues ? 'right' : 'left'} name={hasSecondaryValues ? secondaryMetricLabel : `${metricLabel} em linha`} type="monotone" dataKey={hasSecondaryValues ? 'secondaryValue' : 'value'} stroke="var(--easy-primary)" strokeWidth={3} dot={{ r: 3 }} />
         </ComposedChart>
       </ResponsiveContainer>
     );

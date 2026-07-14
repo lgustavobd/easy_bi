@@ -26,6 +26,7 @@ type WidgetState = {
   title: string;
   datasetId: string;
   metricColumn: string;
+  secondaryMetricColumn: string;
   dimensionColumn: string;
   tableColumns: string[];
   tableColumnFormats: TableColumnFormatConfig;
@@ -94,6 +95,10 @@ const widgetCatalog: WidgetCatalogItem[] = [
 
 function widgetVisualType(widget: Pick<WidgetState, 'type' | 'visualType'>) {
   return widget.visualType || widget.type;
+}
+
+function isComboVisual(widget: Pick<WidgetState, 'type' | 'visualType'>) {
+  return widgetVisualType(widget) === 'COMBO_CHART';
 }
 
 function catalogItemForWidget(widget: Pick<WidgetState, 'type' | 'visualType'>) {
@@ -243,6 +248,11 @@ function firstMetric(dataset: any) {
   return metricColumns(dataset)[0]?.name || '';
 }
 
+function secondMetric(dataset: any, primaryMetric?: string) {
+  const metrics = metricColumns(dataset);
+  return metrics.find((column: any) => column.name && column.name !== primaryMetric)?.name || metrics[0]?.name || '';
+}
+
 function firstDimension(dataset: any) {
   return dimensionColumns(dataset)[0]?.name || '';
 }
@@ -250,6 +260,22 @@ function firstDimension(dataset: any) {
 function defaultTableColumns(dataset: any) {
   const columns = getColumns(dataset).map((column: any) => column.name).filter(Boolean);
   return columns.slice(0, Math.min(4, columns.length));
+}
+
+function mergeComboData(primaryData: any, secondaryData: any) {
+  const primaryRows = Array.isArray(primaryData?.rows) ? primaryData.rows : [];
+  const secondaryRows = Array.isArray(secondaryData?.rows) ? secondaryData.rows : [];
+  if (!secondaryRows.length) return primaryData;
+
+  const rowsByName = new Map<string, any>();
+  primaryRows.forEach((row: any) => rowsByName.set(String(row.name), { ...row }));
+  secondaryRows.forEach((row: any) => {
+    const key = String(row.name);
+    const current = rowsByName.get(key) || { name: row.name, value: 0 };
+    rowsByName.set(key, { ...current, secondaryValue: Number(row.value || 0) });
+  });
+
+  return { ...primaryData, rows: Array.from(rowsByName.values()) };
 }
 
 function widgetFactory(type: WidgetType, partial: Partial<WidgetState> = {}): WidgetState {
@@ -261,6 +287,7 @@ function widgetFactory(type: WidgetType, partial: Partial<WidgetState> = {}): Wi
     title: partial.title || 'Novo componente',
     datasetId: partial.datasetId || '',
     metricColumn: partial.metricColumn || '',
+    secondaryMetricColumn: partial.secondaryMetricColumn || '',
     dimensionColumn: partial.dimensionColumn || '',
     tableColumns: partial.tableColumns || [],
     tableColumnFormats: partial.tableColumnFormats || {},
@@ -282,12 +309,14 @@ function widgetFactory(type: WidgetType, partial: Partial<WidgetState> = {}): Wi
 function normalizeWidget(widget: any, dashboardDataset: any): WidgetState {
   const position = (widget.positionConfig || {}) as any;
   const config = (widget.config || {}) as any;
+  const metricColumn = widget.metricColumn || firstMetric(dashboardDataset);
   return widgetFactory(widget.type || 'BAR_CHART', {
     id: widget.id,
     visualType: config.visualType || widget.type || 'BAR_CHART',
     title: widget.title || 'Componente',
     datasetId: dashboardDataset?.id || widget.datasetId || '',
-    metricColumn: widget.metricColumn || firstMetric(dashboardDataset),
+    metricColumn,
+    secondaryMetricColumn: config.secondaryMetricColumn || secondMetric(dashboardDataset, metricColumn),
     dimensionColumn: widget.dimensionColumn || firstDimension(dashboardDataset),
     tableColumns: Array.isArray(config.tableColumns) && config.tableColumns.length ? config.tableColumns : [widget.dimensionColumn || firstDimension(dashboardDataset), widget.metricColumn || firstMetric(dashboardDataset)].filter(Boolean),
     tableColumnFormats: typeof config.tableColumnFormats === 'object' && config.tableColumnFormats ? config.tableColumnFormats : {},
@@ -317,6 +346,7 @@ function widgetPayload(widget: WidgetState, datasetId: string) {
     config: {
       showLegend: widget.showLegend,
       visualType: widget.visualType !== widget.type ? widget.visualType : undefined,
+      secondaryMetricColumn: isComboVisual(widget) ? widget.secondaryMetricColumn || undefined : undefined,
       tableColumns: widget.type === 'TABLE' ? (widget.tableColumns?.length ? widget.tableColumns : [widget.dimensionColumn, widget.metricColumn].filter(Boolean)) : undefined,
       tableColumnFormats: widget.type === 'TABLE' ? cleanTableColumnFormats(widget.tableColumnFormats, widget.tableColumns) : undefined,
       valueFormat: widget.valueFormat,
@@ -361,16 +391,29 @@ function canEditDashboard(user: any, organization: any) {
 function WidgetCard({ widget, dataset, filters, onEdit, onRemove, onSelect, onToggleLock, selected }: { widget: WidgetState; dataset: any; filters: FilterRule[]; selected: boolean; onEdit: () => void; onRemove: () => void; onSelect: () => void; onToggleLock: () => void }) {
   const cardRef = useRef<HTMLElement | null>(null);
   const { data, isFetching } = useQuery({
-    queryKey: ['dashboard-preview', widget.datasetId, widget.metricColumn, widget.dimensionColumn, JSON.stringify(widget.tableColumns || []), widget.aggregation, widget.type, widgetVisualType(widget), JSON.stringify(filters)],
-    queryFn: () => api.dashboards.previewData({
-      datasetId: widget.datasetId,
-      metricColumn: widget.metricColumn,
-      dimensionColumn: widget.type === 'KPI' ? undefined : widget.dimensionColumn,
-      tableColumns: widget.type === 'TABLE' ? (widget.tableColumns?.length ? widget.tableColumns : [widget.dimensionColumn, widget.metricColumn].filter(Boolean)) : undefined,
-      aggregation: widget.aggregation,
-      filters,
-      limit: widget.type === 'TABLE' ? 100 : 40
-    }),
+    queryKey: ['dashboard-preview', widget.datasetId, widget.metricColumn, widget.secondaryMetricColumn, widget.dimensionColumn, JSON.stringify(widget.tableColumns || []), widget.aggregation, widget.type, widgetVisualType(widget), JSON.stringify(filters)],
+    queryFn: async () => {
+      const primaryData = await api.dashboards.previewData({
+        datasetId: widget.datasetId,
+        metricColumn: widget.metricColumn,
+        dimensionColumn: widget.type === 'KPI' ? undefined : widget.dimensionColumn,
+        tableColumns: widget.type === 'TABLE' ? (widget.tableColumns?.length ? widget.tableColumns : [widget.dimensionColumn, widget.metricColumn].filter(Boolean)) : undefined,
+        aggregation: widget.aggregation,
+        filters,
+        limit: widget.type === 'TABLE' ? 100 : 40
+      });
+      if (!isComboVisual(widget) || !widget.secondaryMetricColumn) return primaryData;
+      if (widget.secondaryMetricColumn === widget.metricColumn) return mergeComboData(primaryData, primaryData);
+      const secondaryData = await api.dashboards.previewData({
+        datasetId: widget.datasetId,
+        metricColumn: widget.secondaryMetricColumn,
+        dimensionColumn: widget.dimensionColumn,
+        aggregation: widget.aggregation,
+        filters,
+        limit: 40
+      });
+      return mergeComboData(primaryData, secondaryData);
+    },
     enabled: Boolean(widget.datasetId),
     staleTime: 5_000
   });
@@ -393,7 +436,7 @@ function WidgetCard({ widget, dataset, filters, onEdit, onRemove, onSelect, onTo
         </div>
       </div>
       <div className="h-[calc(100%-58px)] p-4">
-        <ChartRenderer type={widgetVisualType(widget)} metric={widget.metricColumn} dimension={widget.dimensionColumn} showLegend={widget.showLegend} formatConfig={{ type: widget.valueFormat, prefix: widget.valuePrefix, suffix: widget.valueSuffix, decimals: widget.valueDecimals }} tableColumnFormats={widget.tableColumnFormats} data={data} loading={isFetching} />
+        <ChartRenderer type={widgetVisualType(widget)} metric={widget.metricColumn} secondaryMetric={widget.secondaryMetricColumn} dimension={widget.dimensionColumn} showLegend={widget.showLegend} formatConfig={{ type: widget.valueFormat, prefix: widget.valuePrefix, suffix: widget.valueSuffix, decimals: widget.valueDecimals }} tableColumnFormats={widget.tableColumnFormats} data={data} loading={isFetching} />
       </div>
       <div className="resize-helper">{widget.locked ? 'posição travada' : 'arraste a borda para redimensionar'}</div>
     </article>
@@ -409,16 +452,29 @@ function WidgetEditorModal({ widget, dataset, filters, onClose, onSave }: { widg
   const selectedType = catalogItemForWidget(draft);
   const SelectedIcon = selectedType.icon;
   const { data: previewData, isFetching: previewLoading } = useQuery({
-    queryKey: ['dashboard-edit-preview', dataset?.id, draft.type, widgetVisualType(draft), draft.metricColumn, draft.dimensionColumn, JSON.stringify(draft.tableColumns || []), draft.aggregation, JSON.stringify(filters)],
-    queryFn: () => api.dashboards.previewData({
-      datasetId: dataset?.id || draft.datasetId,
-      metricColumn: draft.metricColumn,
-      dimensionColumn: draft.type === 'KPI' ? undefined : draft.dimensionColumn,
-      tableColumns: draft.type === 'TABLE' ? (draft.tableColumns?.length ? draft.tableColumns : [draft.dimensionColumn, draft.metricColumn].filter(Boolean)) : undefined,
-      aggregation: draft.aggregation,
-      filters,
-      limit: draft.type === 'TABLE' ? 50 : 30
-    }),
+    queryKey: ['dashboard-edit-preview', dataset?.id, draft.type, widgetVisualType(draft), draft.metricColumn, draft.secondaryMetricColumn, draft.dimensionColumn, JSON.stringify(draft.tableColumns || []), draft.aggregation, JSON.stringify(filters)],
+    queryFn: async () => {
+      const primaryData = await api.dashboards.previewData({
+        datasetId: dataset?.id || draft.datasetId,
+        metricColumn: draft.metricColumn,
+        dimensionColumn: draft.type === 'KPI' ? undefined : draft.dimensionColumn,
+        tableColumns: draft.type === 'TABLE' ? (draft.tableColumns?.length ? draft.tableColumns : [draft.dimensionColumn, draft.metricColumn].filter(Boolean)) : undefined,
+        aggregation: draft.aggregation,
+        filters,
+        limit: draft.type === 'TABLE' ? 50 : 30
+      });
+      if (!isComboVisual(draft) || !draft.secondaryMetricColumn) return primaryData;
+      if (draft.secondaryMetricColumn === draft.metricColumn) return mergeComboData(primaryData, primaryData);
+      const secondaryData = await api.dashboards.previewData({
+        datasetId: dataset?.id || draft.datasetId,
+        metricColumn: draft.secondaryMetricColumn,
+        dimensionColumn: draft.dimensionColumn,
+        aggregation: draft.aggregation,
+        filters,
+        limit: 30
+      });
+      return mergeComboData(primaryData, secondaryData);
+    },
     enabled: Boolean(dataset?.id || draft.datasetId)
   });
 
@@ -446,7 +502,24 @@ function WidgetEditorModal({ widget, dataset, filters, onClose, onSave }: { widg
   function changeAggregation(aggregation: Aggregation) {
     const nextMetrics = ['COUNT', 'DISTINCT_COUNT'].includes(aggregation) ? getColumns(dataset) : metricColumns(dataset);
     const currentMetricExists = nextMetrics.some((column: any) => column.name === draft.metricColumn);
-    patchDraft({ aggregation, metricColumn: currentMetricExists ? draft.metricColumn : nextMetrics[0]?.name || '' });
+    const metricColumn = currentMetricExists ? draft.metricColumn : nextMetrics[0]?.name || '';
+    const currentSecondaryExists = nextMetrics.some((column: any) => column.name === draft.secondaryMetricColumn);
+    patchDraft({
+      aggregation,
+      metricColumn,
+      secondaryMetricColumn: isComboVisual(draft)
+        ? (currentSecondaryExists && draft.secondaryMetricColumn !== metricColumn ? draft.secondaryMetricColumn : secondMetric(dataset, metricColumn))
+        : draft.secondaryMetricColumn
+    });
+  }
+
+  function changeMetricColumn(metricColumn: string) {
+    patchDraft({
+      metricColumn,
+      secondaryMetricColumn: isComboVisual(draft) && (!draft.secondaryMetricColumn || draft.secondaryMetricColumn === metricColumn)
+        ? secondMetric(dataset, metricColumn)
+        : draft.secondaryMetricColumn
+    });
   }
 
   function toggleTableColumn(columnName: string) {
@@ -482,6 +555,7 @@ function WidgetEditorModal({ widget, dataset, filters, onClose, onSave }: { widg
     patchDraft({
       type,
       visualType: item.visualType,
+      secondaryMetricColumn: item.visualType === 'COMBO_CHART' ? draft.secondaryMetricColumn || secondMetric(dataset, draft.metricColumn) : draft.secondaryMetricColumn,
       tableColumns: type === 'TABLE' ? (draft.tableColumns?.length ? draft.tableColumns : defaultTableColumns(dataset)) : draft.tableColumns,
       showLegend: type !== 'KPI' && type !== 'TABLE',
       w: type === 'KPI' ? Math.max(3, Math.min(draft.w, 4)) : Math.max(draft.w, 5),
@@ -493,6 +567,7 @@ function WidgetEditorModal({ widget, dataset, filters, onClose, onSave }: { widg
     onSave({
       ...draft,
       datasetId: dataset?.id || draft.datasetId,
+      secondaryMetricColumn: isComboVisual(draft) ? draft.secondaryMetricColumn || secondMetric(dataset, draft.metricColumn) : draft.secondaryMetricColumn,
       tableColumns: draft.type === 'TABLE' ? (draft.tableColumns?.length ? draft.tableColumns : defaultTableColumns(dataset)) : draft.tableColumns,
       tableColumnFormats: draft.type === 'TABLE' ? cleanTableColumnFormats(draft.tableColumnFormats, draft.tableColumns) : {},
       w: Math.min(12, Math.max(2, Number(draft.w) || 2)),
@@ -529,7 +604,7 @@ function WidgetEditorModal({ widget, dataset, filters, onClose, onSave }: { widg
               {draft.locked && <span className="lock-badge"><Lock size={11} /> travado</span>}
             </div>
             <div className="h-[260px] p-4">
-              <ChartRenderer type={widgetVisualType(draft)} metric={draft.metricColumn} dimension={draft.dimensionColumn} showLegend={draft.showLegend} formatConfig={{ type: draft.valueFormat, prefix: draft.valuePrefix, suffix: draft.valueSuffix, decimals: draft.valueDecimals }} tableColumnFormats={draft.tableColumnFormats} data={previewData} loading={previewLoading} />
+              <ChartRenderer type={widgetVisualType(draft)} metric={draft.metricColumn} secondaryMetric={draft.secondaryMetricColumn} dimension={draft.dimensionColumn} showLegend={draft.showLegend} formatConfig={{ type: draft.valueFormat, prefix: draft.valuePrefix, suffix: draft.valueSuffix, decimals: draft.valueDecimals }} tableColumnFormats={draft.tableColumnFormats} data={previewData} loading={previewLoading} />
             </div>
           </section>
 
@@ -555,7 +630,8 @@ function WidgetEditorModal({ widget, dataset, filters, onClose, onSave }: { widg
               <div className="flex items-center gap-3"><div className="section-step">2</div><div><p className="font-black text-slate-950">Configure os dados</p><p className="text-xs font-medium text-slate-500">Métrica, atributo e agregação do dataset único <strong>{dataset?.name || 'selecionado'}</strong>.</p></div></div>
               <div className="mt-4 grid gap-3 md:grid-cols-2">
                 <label className="space-y-1 md:col-span-2"><span className="form-label">Título</span><input value={draft.title} onChange={(event) => patchDraft({ title: event.target.value })} className="form-input" /></label>
-                <label className="space-y-1"><span className="form-label">{['COUNT', 'DISTINCT_COUNT'].includes(draft.aggregation) ? 'Atributo contado' : 'Métrica'}</span><select value={draft.metricColumn} onChange={(event) => patchDraft({ metricColumn: event.target.value })} className="form-select">{metrics.map((column: any) => <option key={column.id || column.name} value={column.name}>{columnLabel(column)}</option>)}</select></label>
+                <label className="space-y-1"><span className="form-label">{['COUNT', 'DISTINCT_COUNT'].includes(draft.aggregation) ? 'Atributo contado' : 'Métrica'}</span><select value={draft.metricColumn} onChange={(event) => changeMetricColumn(event.target.value)} className="form-select">{metrics.map((column: any) => <option key={column.id || column.name} value={column.name}>{columnLabel(column)}</option>)}</select></label>
+                {isComboVisual(draft) && <label className="space-y-1"><span className="form-label">Segunda metrica (linha)</span><select value={draft.secondaryMetricColumn || secondMetric(dataset, draft.metricColumn)} onChange={(event) => patchDraft({ secondaryMetricColumn: event.target.value })} className="form-select">{metrics.map((column: any) => <option key={column.id || column.name} value={column.name}>{columnLabel(column)}</option>)}</select></label>}
                 {draft.type !== 'KPI' && <label className="space-y-1"><span className="form-label">Atributo/dimensão</span><select value={draft.dimensionColumn} onChange={(event) => patchDraft({ dimensionColumn: event.target.value })} className="form-select">{dimensions.map((column: any) => <option key={column.id || column.name} value={column.name}>{columnLabel(column)}</option>)}</select></label>}
               </div>
               {draft.type === 'TABLE' && (
@@ -719,14 +795,16 @@ export function DashboardBuilderPage() {
   }, [id, selectedDatasetId]);
 
   function buildBase(dataset = selectedDataset) {
-    return { datasetId: dataset?.id || '', metricColumn: firstMetric(dataset), dimensionColumn: firstDimension(dataset), tableColumns: defaultTableColumns(dataset), aggregation: 'SUM' as Aggregation };
+    const metricColumn = firstMetric(dataset);
+    return { datasetId: dataset?.id || '', metricColumn, secondaryMetricColumn: secondMetric(dataset, metricColumn), dimensionColumn: firstDimension(dataset), tableColumns: defaultTableColumns(dataset), aggregation: 'SUM' as Aggregation };
   }
 
   function changeDashboardDataset(datasetId: string) {
     const dataset = datasets.find((item: any) => item.id === datasetId);
     setSelectedDatasetId(datasetId);
     setFilters([]);
-    setWidgets((current) => current.map((widget) => ({ ...widget, datasetId, metricColumn: firstMetric(dataset), dimensionColumn: firstDimension(dataset), tableColumns: widget.type === 'TABLE' ? defaultTableColumns(dataset) : widget.tableColumns, tableColumnFormats: {} })));
+    const metricColumn = firstMetric(dataset);
+    setWidgets((current) => current.map((widget) => ({ ...widget, datasetId, metricColumn, secondaryMetricColumn: isComboVisual(widget) ? secondMetric(dataset, metricColumn) : widget.secondaryMetricColumn, dimensionColumn: firstDimension(dataset), tableColumns: widget.type === 'TABLE' ? defaultTableColumns(dataset) : widget.tableColumns, tableColumnFormats: {} })));
     setStatus('Dataset do dashboard alterado. Todos os gráficos foram apontados para esse dataset. Clique em Salvar para persistir.');
   }
 

@@ -20,6 +20,17 @@ function firstMetric(dataset: any) {
   return metric?.name || columns[0]?.name || '';
 }
 
+function metricColumns(dataset: any) {
+  const columns = dataset?.columns || [];
+  const metrics = columns.filter((column: any) => column.isMetric || ['NUMBER', 'CURRENCY', 'PERCENTAGE'].includes(column.dataType));
+  return metrics.length ? metrics : columns;
+}
+
+function secondMetric(dataset: any, primaryMetric?: string) {
+  const metrics = metricColumns(dataset);
+  return metrics.find((column: any) => column.name && column.name !== primaryMetric)?.name || metrics[0]?.name || '';
+}
+
 function firstDimension(dataset: any) {
   const columns = dataset?.columns || [];
   const dimension = columns.find((column: any) => column.isDimension || ['TEXT', 'DATE', 'BOOLEAN'].includes(column.dataType));
@@ -31,16 +42,38 @@ function defaultTableColumns(dataset: any) {
   return columns.slice(0, Math.min(4, columns.length));
 }
 
+function isComboVisual(widget: any) {
+  return (widget.visualType || widget.type) === 'COMBO_CHART';
+}
+
+function mergeComboData(primaryData: any, secondaryData: any) {
+  const primaryRows = Array.isArray(primaryData?.rows) ? primaryData.rows : [];
+  const secondaryRows = Array.isArray(secondaryData?.rows) ? secondaryData.rows : [];
+  if (!secondaryRows.length) return primaryData;
+
+  const rowsByName = new Map<string, any>();
+  primaryRows.forEach((row: any) => rowsByName.set(String(row.name), { ...row }));
+  secondaryRows.forEach((row: any) => {
+    const key = String(row.name);
+    const current = rowsByName.get(key) || { name: row.name, value: 0 };
+    rowsByName.set(key, { ...current, secondaryValue: Number(row.value || 0) });
+  });
+
+  return { ...primaryData, rows: Array.from(rowsByName.values()) };
+}
+
 function normalizeWidget(widget: any, dataset: any) {
   const position = widget.positionConfig || {};
   const config = widget.config || {};
+  const metricColumn = widget.metricColumn || firstMetric(dataset);
   return {
     id: widget.id,
     type: widget.type || 'BAR_CHART',
     visualType: config.visualType || widget.type || 'BAR_CHART',
     title: widget.title || 'Componente',
     datasetId: dataset?.id || widget.datasetId || '',
-    metricColumn: widget.metricColumn || firstMetric(dataset),
+    metricColumn,
+    secondaryMetricColumn: config.secondaryMetricColumn || secondMetric(dataset, metricColumn),
     dimensionColumn: widget.dimensionColumn || firstDimension(dataset),
     tableColumns: Array.isArray(config.tableColumns) && config.tableColumns.length ? config.tableColumns : defaultTableColumns(dataset),
     tableColumnFormats: typeof config.tableColumnFormats === 'object' && config.tableColumnFormats ? config.tableColumnFormats : {},
@@ -61,16 +94,29 @@ function WidgetView({ widget, dataset, filters }: { widget: any; dataset: any; f
   const cardRef = useRef<HTMLElement | null>(null);
   const visualType = widget.visualType || widget.type;
   const { data, isFetching } = useQuery({
-    queryKey: ['dashboard-view-widget', widget.id, widget.datasetId, widget.metricColumn, widget.dimensionColumn, JSON.stringify(widget.tableColumns || []), widget.aggregation, widget.type, visualType, JSON.stringify(filters)],
-    queryFn: () => api.dashboards.previewData({
-      datasetId: widget.datasetId,
-      metricColumn: widget.metricColumn,
-      dimensionColumn: widget.type === 'KPI' ? undefined : widget.dimensionColumn,
-      tableColumns: widget.type === 'TABLE' ? (widget.tableColumns?.length ? widget.tableColumns : [widget.dimensionColumn, widget.metricColumn].filter(Boolean)) : undefined,
-      aggregation: widget.aggregation,
-      filters,
-      limit: widget.type === 'TABLE' ? 100 : 40
-    }),
+    queryKey: ['dashboard-view-widget', widget.id, widget.datasetId, widget.metricColumn, widget.secondaryMetricColumn, widget.dimensionColumn, JSON.stringify(widget.tableColumns || []), widget.aggregation, widget.type, visualType, JSON.stringify(filters)],
+    queryFn: async () => {
+      const primaryData = await api.dashboards.previewData({
+        datasetId: widget.datasetId,
+        metricColumn: widget.metricColumn,
+        dimensionColumn: widget.type === 'KPI' ? undefined : widget.dimensionColumn,
+        tableColumns: widget.type === 'TABLE' ? (widget.tableColumns?.length ? widget.tableColumns : [widget.dimensionColumn, widget.metricColumn].filter(Boolean)) : undefined,
+        aggregation: widget.aggregation,
+        filters,
+        limit: widget.type === 'TABLE' ? 100 : 40
+      });
+      if (!isComboVisual(widget) || !widget.secondaryMetricColumn) return primaryData;
+      if (widget.secondaryMetricColumn === widget.metricColumn) return mergeComboData(primaryData, primaryData);
+      const secondaryData = await api.dashboards.previewData({
+        datasetId: widget.datasetId,
+        metricColumn: widget.secondaryMetricColumn,
+        dimensionColumn: widget.dimensionColumn,
+        aggregation: widget.aggregation,
+        filters,
+        limit: 40
+      });
+      return mergeComboData(primaryData, secondaryData);
+    },
     enabled: Boolean(widget.datasetId),
     staleTime: 5_000
   });
@@ -88,7 +134,7 @@ function WidgetView({ widget, dataset, filters }: { widget: any; dataset: any; f
         </div>
       </div>
       <div className="h-[calc(100%-62px)] p-4">
-        <ChartRenderer type={visualType} metric={widget.metricColumn} dimension={widget.dimensionColumn} showLegend={widget.showLegend} formatConfig={{ type: widget.valueFormat, prefix: widget.valuePrefix, suffix: widget.valueSuffix, decimals: widget.valueDecimals }} tableColumnFormats={widget.tableColumnFormats} data={data} loading={isFetching} />
+        <ChartRenderer type={visualType} metric={widget.metricColumn} secondaryMetric={widget.secondaryMetricColumn} dimension={widget.dimensionColumn} showLegend={widget.showLegend} formatConfig={{ type: widget.valueFormat, prefix: widget.valuePrefix, suffix: widget.valueSuffix, decimals: widget.valueDecimals }} tableColumnFormats={widget.tableColumnFormats} data={data} loading={isFetching} />
       </div>
     </article>
   );
