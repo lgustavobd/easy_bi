@@ -3,6 +3,8 @@ import type { CSSProperties } from 'react';
 import { Building2, CheckCircle2, Image as ImageIcon, Palette, Search, ShieldAlert, Sparkles, UploadCloud } from 'lucide-react';
 import { api } from '../../api/resources.api';
 import { useAuthStore } from '../../store/auth.store';
+import { planBlockedMessage, planFeature } from '../../utils/plan';
+import { useConfirm } from '../../components/ConfirmDialog';
 
 type ThemeOption = {
   accent: string;
@@ -54,6 +56,7 @@ function brandImageUrl(value?: string) {
 
 export function AppearancePage() {
   const { user, organization, updateCurrentOrganization } = useAuthStore();
+  const confirm = useConfirm();
   const [selected, setSelected] = useState(currentAccent(organization));
   const [message, setMessage] = useState('');
   const [query, setQuery] = useState('');
@@ -61,6 +64,7 @@ export function AppearancePage() {
   const [uploadingLogo, setUploadingLogo] = useState(false);
 
   const canEdit = Boolean(user?.isSuperAdmin || organization?.role === 'ORG_ADMIN' || organization?.role === 'SUPER_ADMIN');
+  const canUseCustomLogo = planFeature(organization, 'canUseCustomLogo');
   const selectedTheme = useMemo(() => themes.find((item) => item.accent === selected) || themes[0], [selected]);
   const organizationLogo = brandImageUrl(organization?.themeConfig?.brandImageUrl);
 
@@ -91,6 +95,14 @@ export function AppearancePage() {
       return;
     }
 
+    const confirmed = await confirm({
+      title: 'Salvar aparencia?',
+      description: `A identidade visual da organizacao "${organization.name}" sera alterada para "${selectedTheme.name}".`,
+      confirmLabel: 'Sim, salvar aparencia',
+      tone: 'warning'
+    });
+    if (!confirmed) return;
+
     try {
       const updated = await api.organizations.update(organization.id, {
         themeConfig: {
@@ -105,6 +117,13 @@ export function AppearancePage() {
       updateCurrentOrganization({ themeConfig: updated.themeConfig });
       document.documentElement.dataset.accent = selectedTheme.accent;
       setMessage(`Aparência salva com a cor ${selectedTheme.name}. Essa identidade será aplicada para os usuários dessa organização.`);
+      await confirm({
+        title: 'Aparencia salva',
+        description: `A cor "${selectedTheme.name}" foi aplicada com sucesso.`,
+        confirmLabel: 'OK',
+        hideCancel: true,
+        tone: 'success'
+      });
     } catch (error: any) {
       setMessage(error?.response?.data?.message || 'Não foi possível salvar a aparência.');
     }
@@ -117,9 +136,14 @@ export function AppearancePage() {
       return;
     }
 
-    const allowedTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'];
+    if (!canUseCustomLogo) {
+      setMessage(planBlockedMessage(organization, 'usar logo personalizado'));
+      return;
+    }
+
+    const allowedTypes = ['image/png', 'image/jpeg', 'image/webp'];
     if (!allowedTypes.includes(file.type)) {
-      setMessage('Envie uma imagem PNG, JPG, WEBP ou SVG.');
+      setMessage('Envie uma imagem PNG, JPG ou WEBP.');
       return;
     }
 
@@ -127,6 +151,14 @@ export function AppearancePage() {
       setMessage('A imagem deve ter atÃ© 2MB.');
       return;
     }
+
+    const confirmed = await confirm({
+      title: 'Enviar logo da organizacao?',
+      description: `Confirma enviar "${file.name}" para aparecer ao lado do logo Easy BI da organizacao "${organization.name}"?`,
+      confirmLabel: 'Sim, enviar imagem',
+      tone: 'warning'
+    });
+    if (!confirmed) return;
 
     setUploadingLogo(true);
     setMessage('');
@@ -136,6 +168,13 @@ export function AppearancePage() {
       form.append('file', file);
       const updated = await api.organizations.uploadBrandImage(organization.id, form);
       updateCurrentOrganization({ themeConfig: updated.themeConfig });
+      await confirm({
+        title: 'Logo salvo',
+        description: 'A imagem da organizacao foi salva com sucesso.',
+        confirmLabel: 'OK',
+        hideCancel: true,
+        tone: 'success'
+      });
       setMessage('Imagem da organizaÃ§Ã£o salva. Ela aparecerÃ¡ ao lado direito do logo Easy BI.');
     } catch (error: any) {
       setMessage(error?.response?.data?.message || 'NÃ£o foi possÃ­vel enviar a imagem da organizaÃ§Ã£o.');
@@ -152,13 +191,17 @@ export function AppearancePage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <p className="eyebrow">Administração</p>
-        <h2 className="page-title">Aparência da organização</h2>
-        <p className="mt-2 max-w-3xl text-sm font-medium text-slate-500">
-          Escolha a identidade visual da empresa. A cor selecionada muda menu, botões, filtros, dashboards, gráficos, cards, gradientes e destaques.
-        </p>
-      </div>
+      <section className="dashboard-gallery-hero selection-hero selection-hero-appearance">
+        <div className="dashboard-gallery-hero-content">
+          <p className="eyebrow text-white/80">Easy BI Workspace</p>
+          <h3>Aparencia da organizacao</h3>
+          <p>Escolha a identidade visual da empresa. A cor selecionada muda menu, botoes, filtros, dashboards, graficos, cards, gradientes e destaques.</p>
+        </div>
+        <div className="selection-hero-actions">
+          <span className="selection-hero-pill"><Palette size={15} /> {selectedTheme.name}</span>
+          <span className="selection-hero-pill"><Building2 size={15} /> {organization?.name || 'Organizacao'}</span>
+        </div>
+      </section>
 
       {!canEdit && (
         <div className="rounded-2xl border border-yellow-200 bg-yellow-50 p-5 text-sm font-bold text-yellow-900">
@@ -227,14 +270,14 @@ export function AppearancePage() {
                 </div>
               </div>
 
-              <label className={`btn-primary cursor-pointer ${(!canEdit || !organization?.id || uploadingLogo) ? 'pointer-events-none opacity-50' : ''}`}>
+              <label className={`btn-primary cursor-pointer ${(!canEdit || !canUseCustomLogo || !organization?.id || uploadingLogo) ? 'pointer-events-none opacity-50' : ''}`}>
                 <UploadCloud size={18} />
                 {uploadingLogo ? 'Enviando...' : 'Enviar imagem'}
                 <input
                   type="file"
-                  accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                  accept="image/png,image/jpeg,image/webp"
                   className="hidden"
-                  disabled={!canEdit || !organization?.id || uploadingLogo}
+                  disabled={!canEdit || !canUseCustomLogo || !organization?.id || uploadingLogo}
                   onChange={(event) => {
                     uploadBrandImage(event.target.files?.[0]);
                     event.target.value = '';
@@ -242,6 +285,7 @@ export function AppearancePage() {
                 />
               </label>
             </div>
+            {!canUseCustomLogo && <p className="mt-3 rounded-2xl bg-amber-50 p-3 text-xs font-bold text-amber-700">O plano atual nao permite logo personalizado. O Super Admin pode alterar o plano da organizacao.</p>}
 
             <div className="mt-5 flex flex-wrap items-center gap-4 rounded-2xl border border-white bg-white p-4">
               <div className="easybi-brand-lock max-w-sm">

@@ -3,10 +3,11 @@ import { PrismaService } from '../../database/prisma.service';
 import { slugify } from '../../common/utils/slugify';
 import { getAccessibleSectorIds, isOrganizationAdmin } from '../../common/utils/sector-access';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { PlansService } from '../plans/plans.service';
 
 @Injectable()
 export class SectorsService {
-  constructor(private prisma: PrismaService, private audit: AuditLogsService) {}
+  constructor(private prisma: PrismaService, private audit: AuditLogsService, private plans: PlansService) {}
 
   async list(user: any, organizationId?: string) {
     if (!organizationId) throw new ForbiddenException('Organização não informada.');
@@ -22,6 +23,7 @@ export class SectorsService {
     if (!targetOrgId) throw new ForbiddenException('Organização não informada.');
     if (!(await isOrganizationAdmin(this.prisma, user, targetOrgId))) throw new ForbiddenException('Apenas Admin SaaS ou Admin da Organização pode criar setores.');
 
+    await this.plans.assertFeature(targetOrgId, 'canCreateSectors');
     const code = String(dto.code || slugify(dto.name)).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_|_$/g, '').toUpperCase();
     if (!code) throw new BadRequestException('Código do setor inválido.');
 

@@ -6,7 +6,7 @@ export type FilterRule = {
   dimension: string;
   value?: string;
   values?: string[];
-  operator?: 'equals' | 'contains' | 'notContains' | 'startsWith' | 'between' | 'empty' | string;
+  operator?: 'equals' | 'notEquals' | 'contains' | 'notContains' | 'startsWith' | 'endsWith' | 'in' | 'notIn' | 'between' | 'gte' | 'lte' | 'empty' | 'notEmpty' | string;
 };
 
 export type ChartDataResult = {
@@ -15,6 +15,7 @@ export type ChartDataResult = {
   columns?: Array<{ name: string; label?: string; dataType?: string; formatConfig?: ValueFormatConfig }>;
   totalRows?: number;
   formatConfig?: ValueFormatConfig;
+  secondaryFormatConfig?: ValueFormatConfig;
 };
 
 export type ValueFormatConfig = {
@@ -37,6 +38,7 @@ type ChartRendererProps = {
   dimension?: string;
   showLegend?: boolean;
   formatConfig?: ValueFormatConfig;
+  secondaryFormatConfig?: ValueFormatConfig;
   tableColumnFormats?: TableColumnFormatConfig;
   data?: ChartDataResult;
   loading?: boolean;
@@ -168,10 +170,24 @@ function formatValue(metric: string | undefined, value: number, config?: ValueFo
   return `${config?.prefix || ''}${formatted}${config?.suffix || ''}`;
 }
 
+function hasDisplayFormat(config?: ValueFormatConfig) {
+  if (!config) return false;
+  const type = String(config.type || 'auto');
+  return Boolean(
+    (type && type !== 'auto') ||
+    config.prefix ||
+    config.suffix ||
+    config.currency ||
+    config.scale !== undefined ||
+    config.durationInput ||
+    config.durationUnit
+  );
+}
+
 function formatAxisTick(metric: string | undefined, value: any, config?: ValueFormatConfig) {
   const numeric = Number(value || 0);
   if (!Number.isFinite(numeric)) return String(value ?? '');
-  if (config?.type && config.type !== 'auto') return formatValue(metric, numeric, config);
+  if (hasDisplayFormat(config)) return formatValue(metric, numeric, config);
   return numeric.toLocaleString('pt-BR', { maximumFractionDigits: 2 });
 }
 
@@ -235,12 +251,13 @@ function TreemapContent(props: any) {
   );
 }
 
-export function ChartRenderer({ type, metric, secondaryMetric, dimension, showLegend = true, formatConfig, tableColumnFormats, data, loading, emptyMessage }: ChartRendererProps) {
+export function ChartRenderer({ type, metric, secondaryMetric, dimension, showLegend = true, formatConfig, secondaryFormatConfig, tableColumnFormats, data, loading, emptyMessage }: ChartRendererProps) {
   if (loading) return <Skeleton />;
 
   const rows = data?.rows || [];
   const total = Number(data?.value || rows.reduce((acc, item) => acc + Number(item.value || 0), 0));
-  const valueFormatConfig = formatConfig?.type && formatConfig.type !== 'auto' ? formatConfig : data?.formatConfig || formatConfig;
+  const valueFormatConfig = hasDisplayFormat(formatConfig) ? formatConfig : data?.formatConfig || formatConfig;
+  const secondaryValueFormatConfig = hasDisplayFormat(secondaryFormatConfig) ? secondaryFormatConfig : data?.secondaryFormatConfig || secondaryFormatConfig || valueFormatConfig;
   const metricLabel = prettify(metric);
   const secondaryMetricLabel = prettify(secondaryMetric);
   const dimensionLabel = prettify(dimension);
@@ -310,11 +327,11 @@ export function ChartRenderer({ type, metric, secondaryMetric, dimension, showLe
           <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
           <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#64748b' }} interval="preserveStartEnd" />
           <YAxis yAxisId="left" tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={(value) => formatAxisTick(metric, value, valueFormatConfig)} />
-          {hasSecondaryValues && <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={(value) => formatAxisTick(secondaryMetric, value, valueFormatConfig)} />}
+          {hasSecondaryValues && <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={(value) => formatAxisTick(secondaryMetric, value, secondaryValueFormatConfig)} />}
           <Tooltip
             formatter={(value: any, _name: any, item: any) => {
               const isSecondary = item?.dataKey === 'secondaryValue';
-              return [formatValue(isSecondary ? secondaryMetric : metric, Number(value || 0), valueFormatConfig), isSecondary ? secondaryMetricLabel : metricLabel];
+              return [formatValue(isSecondary ? secondaryMetric : metric, Number(value || 0), isSecondary ? secondaryValueFormatConfig : valueFormatConfig), isSecondary ? secondaryMetricLabel : metricLabel];
             }}
             labelFormatter={(value) => `${dimensionLabel}: ${value}`}
           />

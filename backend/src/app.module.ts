@@ -9,11 +9,15 @@ import { DashboardsModule } from './modules/dashboards/dashboards.module';
 import { ImportTemplatesModule } from './modules/import-templates/import-templates.module';
 import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
 import { SectorsModule } from './modules/sectors/sectors.module';
+import { PlansModule } from './modules/plans/plans.module';
+import { AccessRequestsModule } from './modules/access-requests/access-requests.module';
+import { PlanChangeRequestsModule } from './modules/plan-change-requests/plan-change-requests.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     PrismaModule,
+    PlansModule,
     AuthModule,
     OrganizationsModule,
     UsersModule,
@@ -21,7 +25,9 @@ import { SectorsModule } from './modules/sectors/sectors.module';
     DashboardsModule,
     ImportTemplatesModule,
     AuditLogsModule,
-    SectorsModule
+    SectorsModule,
+    AccessRequestsModule,
+    PlanChangeRequestsModule
   ]
 })
 export class AppModule {}

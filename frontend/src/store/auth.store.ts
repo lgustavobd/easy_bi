@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-type Organization = { id: string; name: string; slug: string; role?: string; themeConfig?: any };
+type Organization = { id: string; name: string; slug: string; role?: string; themeConfig?: any; planId?: string; plan?: any };
 type User = { id: string; name: string; email: string; isSuperAdmin: boolean };
 
 export const GLOBAL_ADMIN_ORGANIZATION: Organization = {

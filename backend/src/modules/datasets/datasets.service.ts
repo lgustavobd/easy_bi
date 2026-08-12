@@ -6,6 +6,7 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { ColumnAnalyzerService } from './services/column-analyzer.service';
 import { getAccessibleSectorIds, ensureSectorAccess } from '../../common/utils/sector-access';
 import { FileParserService } from './services/file-parser.service';
+import { PlansService } from '../plans/plans.service';
 
 const ROW_INSERT_CHUNK_SIZE = Number(process.env.DATASET_INSERT_CHUNK_SIZE || 2000);
 const CALCULATED_COLUMN_FLAG = 'calculatedMetric';
@@ -28,7 +29,8 @@ export class DatasetsService {
     private prisma: PrismaService,
     private parser: FileParserService,
     private analyzer: ColumnAnalyzerService,
-    private audit: AuditLogsService
+    private audit: AuditLogsService,
+    private plans: PlansService
   ) {}
 
   async upload(
@@ -41,14 +43,17 @@ export class DatasetsService {
     if (!file) throw new BadRequestException('Arquivo não enviado.');
     const datasetName = this.normalizeDatasetName(name || file.originalname.replace(/\.(csv|xlsx|xls)$/i, ''));
     await this.ensureDatasetNameAvailable(datasetName, organizationId);
+    await this.plans.assertCanCreateDataset(organizationId);
     const sector = await ensureSectorAccess(this.prisma, user, organizationId, options?.sectorId);
 
     try {
       const parsed = await this.parser.parse(file, { sheetName: options?.sheetName });
       if (!parsed.rows.length) throw new BadRequestException('Arquivo sem linhas válidas.');
 
+      await this.plans.assertDatasetRows(organizationId, parsed.rows.length);
       const template = options?.templateId ? await this.findTemplate(options.templateId, organizationId) : null;
       const calculatedMetrics = this.getCalculatedMetrics(template);
+      if (calculatedMetrics.length) await this.plans.assertFeature(organizationId, 'canUseCalculatedMetrics');
       const normalizedRows = parsed.rows.map((row) => this.normalizeRow(row));
       const rowsWithDateColumns = this.applyDateDerivedColumns(normalizedRows);
       const rowsWithCalculations = this.applyCalculatedMetrics(rowsWithDateColumns, calculatedMetrics);
@@ -150,6 +155,67 @@ export class DatasetsService {
     return dataset;
   }
 
+  async ensureImportTemplate(id: string, organizationId: string, user: any) {
+    const sectorIds = await getAccessibleSectorIds(this.prisma, user, organizationId);
+    if (!sectorIds.length) throw new NotFoundException('Dataset nao encontrado.');
+    const dataset = await this.prisma.dataset.findFirst({
+      where: { id, organizationId, deletedAt: null, sectorId: { in: sectorIds } },
+      include: { columns: { orderBy: { createdAt: 'asc' } }, sector: true }
+    });
+    if (!dataset) throw new NotFoundException('Dataset nao encontrado.');
+
+    if (dataset.importTemplateId) {
+      const template = await this.prisma.importTemplate.findFirst({
+        where: { id: dataset.importTemplateId, organizationId, deletedAt: null },
+        include: {
+          organization: { select: { id: true, name: true, slug: true } },
+          sector: true,
+          datasets: {
+            where: { deletedAt: null },
+            orderBy: { createdAt: 'desc' },
+            select: { id: true, name: true, rowCount: true, metadata: true, createdAt: true, sectorId: true }
+          }
+        }
+      });
+      if (template) return template;
+    }
+
+    const columns = dataset.columns || [];
+    const template = await this.prisma.importTemplate.create({
+      data: {
+        organizationId,
+        sectorId: dataset.sectorId,
+        createdByUserId: user.id,
+        name: `Modelo - ${dataset.name}`,
+        description: `Modelo gerado automaticamente a partir do dataset ${dataset.name}`,
+        columnMapping: columns.map((column) => ({ originalName: column.originalName, normalizedName: column.name })) as any,
+        detectedTypes: columns.map((column) => ({ name: column.name, dataType: column.dataType, semanticType: column.semanticType })) as any,
+        metrics: columns.filter((column) => column.isMetric).map((column) => column.name) as any,
+        dimensions: columns.filter((column) => column.isDimension).map((column) => column.name) as any,
+        transformationRules: { normalizeHeaders: true } as any,
+        localeConfig: { decimal: ',', thousand: '.', currency: 'BRL', timezone: 'America/Sao_Paulo' } as any
+      },
+      include: {
+        organization: { select: { id: true, name: true, slug: true } },
+        sector: true,
+        datasets: {
+          where: { deletedAt: null },
+          orderBy: { createdAt: 'desc' },
+          select: { id: true, name: true, rowCount: true, metadata: true, createdAt: true, sectorId: true }
+        }
+      }
+    });
+
+    await this.prisma.dataset.update({ where: { id: dataset.id }, data: { importTemplateId: template.id } });
+    await this.audit.register({ organizationId, userId: user.id, action: 'dataset.template_created', entity: 'dataset', entityId: dataset.id, metadata: { importTemplateId: template.id } });
+    return {
+      ...template,
+      datasets: [
+        { id: dataset.id, name: dataset.name, rowCount: dataset.rowCount, metadata: dataset.metadata, createdAt: dataset.createdAt, sectorId: dataset.sectorId },
+        ...(template.datasets || [])
+      ]
+    };
+  }
 
   async rows(id: string, organizationId: string, options: { page?: number; pageSize?: number; search?: string; column?: string }, user?: any) {
     const sectorIds = user ? await getAccessibleSectorIds(this.prisma, user, organizationId) : [];
@@ -253,10 +319,12 @@ export class DatasetsService {
 
     try {
       const parsed = await this.parser.parse(file, { sheetName });
+      await this.plans.assertDatasetRows(organizationId, parsed.rows.length);
       if (!parsed.rows.length) throw new BadRequestException('Arquivo sem linhas válidas.');
 
       const template = dataset.importTemplateId ? await this.findTemplate(dataset.importTemplateId, organizationId) : null;
       const calculatedMetrics = this.getCalculatedMetrics(template);
+      if (calculatedMetrics.length) await this.plans.assertFeature(organizationId, 'canUseCalculatedMetrics');
       const generatedColumnNames = new Set([
         ...calculatedMetrics.map((metric) => metric.name),
         ...dataset.columns.filter((column: any) => this.isSystemGeneratedColumn(column)).map((column: any) => column.name)
@@ -304,6 +372,7 @@ export class DatasetsService {
 
   async appendRowsFromFile(id: string, file: Express.Multer.File, user: any, organizationId: string, sheetName?: string) {
     if (!file) throw new BadRequestException('Arquivo nao enviado.');
+    await this.plans.assertFeature(organizationId, 'canUseAppendRows');
     const dataset = await this.get(id, organizationId, user);
 
     try {
@@ -312,6 +381,7 @@ export class DatasetsService {
 
       const template = dataset.importTemplateId ? await this.findTemplate(dataset.importTemplateId, organizationId) : null;
       const calculatedMetrics = this.getCalculatedMetrics(template);
+      if (calculatedMetrics.length) await this.plans.assertFeature(organizationId, 'canUseCalculatedMetrics');
       const generatedColumnNames = new Set([
         ...calculatedMetrics.map((metric) => metric.name),
         ...dataset.columns.filter((column: any) => this.isSystemGeneratedColumn(column)).map((column: any) => column.name)
@@ -337,6 +407,7 @@ export class DatasetsService {
         this.prisma.datasetRow.count({ where: { datasetId: id, organizationId } })
       ]);
       const startRowIndex = Number(rowIndexAggregate._max.rowIndex || 0) + 1;
+      await this.plans.assertDatasetRows(organizationId, currentRowCount + rowsWithCalculations.length);
 
       for (let start = 0; start < rowsWithCalculations.length; start += ROW_INSERT_CHUNK_SIZE) {
         const chunk = rowsWithCalculations.slice(start, start + ROW_INSERT_CHUNK_SIZE);
@@ -394,12 +465,14 @@ export class DatasetsService {
 
   async patchRowsFromFile(id: string, file: Express.Multer.File, user: any, organizationId: string, matchColumn?: string, sheetName?: string) {
     if (!file) throw new BadRequestException('Arquivo nÃ£o enviado.');
+    await this.plans.assertFeature(organizationId, 'canUsePatchRows');
     const dataset = await this.get(id, organizationId, user);
     const normalizedMatchColumn = this.safeKey(matchColumn || '');
     if (!normalizedMatchColumn) throw new BadRequestException('Escolha uma coluna-chave para localizar as linhas que serÃ£o atualizadas.');
 
     const template = dataset.importTemplateId ? await this.findTemplate(dataset.importTemplateId, organizationId) : null;
     const calculatedMetrics = this.getCalculatedMetrics(template);
+    if (calculatedMetrics.length) await this.plans.assertFeature(organizationId, 'canUseCalculatedMetrics');
     const generatedColumnNames = new Set([
       ...calculatedMetrics.map((metric) => metric.name),
       ...dataset.columns.filter((column: any) => this.isSystemGeneratedColumn(column)).map((column: any) => column.name)
@@ -414,6 +487,7 @@ export class DatasetsService {
     try {
       const parsed = await this.parser.parse(file, { sheetName });
       if (!parsed.rows.length) throw new BadRequestException('Arquivo sem linhas vÃ¡lidas.');
+      await this.plans.assertDatasetRows(organizationId, parsed.rows.length);
 
       const normalizedRows = parsed.rows.map((row) => this.normalizeRow(row));
       const patchesByKey = new Map<string, Record<string, any>>();
@@ -543,6 +617,7 @@ export class DatasetsService {
     if (!dataset) throw new NotFoundException('Dataset não encontrado.');
     const template = dataset.importTemplateId ? await this.findTemplate(dataset.importTemplateId, organizationId) : null;
     const calculatedMetrics = this.getCalculatedMetrics(template);
+    if (calculatedMetrics.length) await this.plans.assertFeature(organizationId, 'canUseCalculatedMetrics');
     const existingCalculatedColumns = dataset.columns.filter((column: any) => this.isCalculatedColumn(column)).map((column: any) => column.name);
     const existingDateDerivedColumns = dataset.columns.filter((column: any) => this.isDateDerivedColumn(column)).map((column: any) => column.name);
     const existingDateDerivedSources = this.dateDerivedSourceColumns(dataset.columns);
@@ -569,6 +644,7 @@ export class DatasetsService {
     if (!template) return { updatedDatasets: 0 };
 
     const calculatedMetrics = this.getCalculatedMetrics(template);
+    if (calculatedMetrics.length) await this.plans.assertFeature(organizationId, 'canUseCalculatedMetrics');
     const datasets = await this.prisma.dataset.findMany({
       where: { organizationId, deletedAt: null, importTemplateId: templateId, ...(sectorIds.length ? { sectorId: { in: sectorIds } } : {}) },
       select: { id: true, columns: true }

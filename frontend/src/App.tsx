@@ -12,7 +12,9 @@ import { DatasetUploadPage } from './pages/datasets/DatasetUploadPage';
 import { UsersPage } from './pages/users/UsersPage';
 import { AuditPage } from './pages/audit/AuditPage';
 import { AdminDashboardPage } from './pages/admin/AdminDashboardPage';
+import { AdminRequestsPage } from './pages/admin/AdminRequestsPage';
 import { OrganizationsPage } from './pages/organizations/OrganizationsPage';
+import { PlansPage } from './pages/plans/PlansPage';
 import { TemplatesPage } from './pages/import-templates/TemplatesPage';
 import { ProfilePage } from './pages/profile/ProfilePage';
 import { AppearancePage } from './pages/settings/AppearancePage';
@@ -71,7 +73,9 @@ export default function App() {
         <Route path="users" element={<UsersPage />} />
         <Route path="audit" element={<AuditPage />} />
         <Route path="admin-dashboard" element={<AdminDashboardPage />} />
+        <Route path="requests" element={<AdminRequestsPage />} />
         <Route path="organizations" element={<OrganizationsPage />} />
+        <Route path="plans" element={<PlansPage />} />
         <Route path="templates" element={<TemplatesPage />} />
         <Route path="appearance" element={<AppearancePage />} />
         <Route path="profile" element={<ProfilePage />} />

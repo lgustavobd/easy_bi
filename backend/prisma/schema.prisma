@@ -75,17 +75,24 @@ enum DashboardPermissionType {
   EDIT
   OWNER
 }
+enum RequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
 
 model Organization {
   id String @id @default(uuid()) @db.Char(36)
   name String @db.VarChar(160)
   slug String @unique @db.VarChar(120)
   document String? @db.VarChar(40)
+  planId String? @map("plan_id") @db.Char(36)
   status OrganizationStatus @default(ACTIVE)
   themeConfig Json? @map("theme_config")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
   deletedAt DateTime? @map("deleted_at")
+  plan Plan? @relation(fields: [planId], references: [id])
   users UserOrganization[]
   datasets Dataset[]
   dashboards Dashboard[]
@@ -94,7 +101,84 @@ model Organization {
   datasetRows DatasetRow[]
   sectors Sector[]
   userSectors UserSector[]
+  planChangeRequests PlanChangeRequest[]
+  @@index([planId])
   @@map("organizations")
+}
+
+model Plan {
+  id String @id @default(uuid()) @db.Char(36)
+  code String @unique @db.VarChar(60)
+  name String @db.VarChar(120)
+  description String? @db.VarChar(255)
+  priceLabel String? @map("price_label") @db.VarChar(80)
+  monthlyPrice Decimal? @map("monthly_price") @db.Decimal(10, 2)
+  currency String @default("BRL") @db.VarChar(12)
+  maxUsers Int? @map("max_users")
+  maxDatasets Int? @map("max_datasets")
+  maxDashboards Int? @map("max_dashboards")
+  maxRowsPerDataset Int? @map("max_rows_per_dataset")
+  canExportCharts Boolean @default(false) @map("can_export_charts")
+  canUseCalculatedMetrics Boolean @default(false) @map("can_use_calculated_metrics")
+  canUsePatchRows Boolean @default(false) @map("can_use_patch_rows")
+  canUseAppendRows Boolean @default(false) @map("can_use_append_rows")
+  canUseCustomLogo Boolean @default(false) @map("can_use_custom_logo")
+  canCreateSectors Boolean @default(false) @map("can_create_sectors")
+  isDefault Boolean @default(false) @map("is_default")
+  isActive Boolean @default(true) @map("is_active")
+  sortOrder Int @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  organizations Organization[]
+  accessRequests AccessRequest[]
+  planChangeRequests PlanChangeRequest[]
+  @@map("plans")
+}
+
+model AccessRequest {
+  id String @id @default(uuid()) @db.Char(36)
+  requesterName String @map("requester_name") @db.VarChar(160)
+  requesterEmail String @map("requester_email") @db.VarChar(180)
+  phone String? @db.VarChar(40)
+  companyName String @map("company_name") @db.VarChar(160)
+  document String? @db.VarChar(40)
+  requestedPlanId String? @map("requested_plan_id") @db.Char(36)
+  message String? @db.Text
+  status RequestStatus @default(PENDING)
+  adminNotes String? @map("admin_notes") @db.Text
+  reviewedByUserId String? @map("reviewed_by_user_id") @db.Char(36)
+  reviewedAt DateTime? @map("reviewed_at")
+  createdOrganizationId String? @map("created_organization_id") @db.Char(36)
+  createdUserId String? @map("created_user_id") @db.Char(36)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  requestedPlan Plan? @relation(fields: [requestedPlanId], references: [id])
+  @@index([requestedPlanId])
+  @@index([status])
+  @@map("access_requests")
+}
+
+model PlanChangeRequest {
+  id String @id @default(uuid()) @db.Char(36)
+  organizationId String @map("organization_id") @db.Char(36)
+  currentPlanId String? @map("current_plan_id") @db.Char(36)
+  requestedPlanId String @map("requested_plan_id") @db.Char(36)
+  requestedByUserId String @map("requested_by_user_id") @db.Char(36)
+  status RequestStatus @default(PENDING)
+  reason String? @db.Text
+  adminNotes String? @map("admin_notes") @db.Text
+  reviewedByUserId String? @map("reviewed_by_user_id") @db.Char(36)
+  reviewedAt DateTime? @map("reviewed_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  organization Organization @relation(fields: [organizationId], references: [id])
+  requestedPlan Plan @relation(fields: [requestedPlanId], references: [id])
+  requestedBy User @relation(fields: [requestedByUserId], references: [id])
+  @@index([organizationId])
+  @@index([requestedPlanId])
+  @@index([requestedByUserId])
+  @@index([status])
+  @@map("plan_change_requests")
 }
 
 model User {
@@ -110,6 +194,7 @@ model User {
   deletedAt DateTime? @map("deleted_at")
   organizations UserOrganization[]
   refreshTokens RefreshToken[]
+  planChangeRequests PlanChangeRequest[]
   datasets Dataset[]
   dashboards Dashboard[]
   importTemplates ImportTemplate[]

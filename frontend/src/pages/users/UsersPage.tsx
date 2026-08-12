@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Edit3, KeyRound, Layers3, Save, Search, ShieldCheck, Trash2, UserPlus, Users, X } from 'lucide-react';
 import { api } from '../../api/resources.api';
 import { useAuthStore } from '../../store/auth.store';
+import { useConfirm } from '../../components/ConfirmDialog';
 
 function canManageUsers(user: any, organization: any) {
   const role = String(organization?.role || '').toUpperCase();
@@ -45,6 +46,17 @@ function toggleId(ids: string[], id: string) {
 
 function sameIds(left: string[], right: string[]) {
   return left.length === right.length && left.every(id => right.includes(id));
+}
+
+function generateTemporaryPassword() {
+  const bytes = new Uint8Array(8);
+  if (window.crypto?.getRandomValues) {
+    window.crypto.getRandomValues(bytes);
+  } else {
+    bytes.forEach((_, index) => { bytes[index] = Math.floor(Math.random() * 256); });
+  }
+  const suffix = Array.from(bytes, value => value.toString(36).padStart(2, '0')).join('').slice(0, 10);
+  return `EasyBI-${suffix}!`;
 }
 
 function SectorSelector({
@@ -93,6 +105,7 @@ function SectorSelector({
 export function UsersPage() {
   const currentOrg = useAuthStore(s => s.organization);
   const currentUser = useAuthStore(s => s.user);
+  const confirm = useConfirm();
   const allowed = canManageUsers(currentUser, currentOrg);
   const [selectedUserOrganizationId, setSelectedUserOrganizationId] = useState(currentOrg?.id || '');
   const { data: users = [], refetch } = useQuery({
@@ -103,7 +116,7 @@ export function UsersPage() {
   const { data: roles = [] } = useQuery({ queryKey: ['roles'], queryFn: api.users.roles, enabled: allowed });
   const { data: organizations = [] } = useQuery({ queryKey: ['organizations'], queryFn: api.organizations.list, enabled: Boolean(currentUser?.isSuperAdmin && allowed) });
 
-  const [form, setForm] = useState({ name: '', email: '', password: 'EasyBI@123', roleId: '', organizationId: currentOrg?.id || '', sectorIds: [] as string[] });
+  const [form, setForm] = useState({ name: '', email: '', password: '', roleId: '', organizationId: currentOrg?.id || '', sectorIds: [] as string[] });
   const [editing, setEditing] = useState<any>(null);
   const [editForm, setEditForm] = useState({ name: '', email: '', status: 'ACTIVE', roleId: '', password: '', organizationId: '', fromOrganizationId: '', sectorIds: [] as string[] });
   const [loading, setLoading] = useState(false);
@@ -208,13 +221,31 @@ export function UsersPage() {
     const sectorIds = formIsOrgAdmin ? allSectorIds : form.sectorIds;
     if (!sectorIds.length) { setMessage('Selecione pelo menos um setor para o usuario.'); return; }
     if (currentUser?.isSuperAdmin && !form.organizationId && !currentOrg?.id) { setMessage('Selecione a organizacao em que o usuario sera criado.'); return; }
+    const confirmed = await confirm({
+      title: 'Criar usuario?',
+      description: `Confirma a criacao do usuario "${form.name}" com acesso ao e-mail ${form.email}?`,
+      details: [
+        formIsOrgAdmin ? 'Perfil Admin da Organizacao: acesso a todos os setores.' : `${sectorIds.length} setor(es) selecionado(s).`,
+        currentUser?.isSuperAdmin ? `Organizacao: ${organizations.find((org: any) => org.id === form.organizationId)?.name || currentOrg?.name || 'selecionada'}` : `Organizacao: ${currentOrg?.name || 'atual'}`
+      ],
+      confirmLabel: 'Sim, criar usuario',
+      tone: 'success'
+    });
+    if (!confirmed) return;
     setLoading(true);
     setMessage('');
     try {
       await api.users.create({ ...form, sectorIds, organizationId: form.organizationId || currentOrg?.id });
-      setForm({ name: '', email: '', password: 'EasyBI@123', roleId: form.roleId, organizationId: form.organizationId, sectorIds });
+      setForm({ name: '', email: '', password: '', roleId: form.roleId, organizationId: form.organizationId, sectorIds });
       setMessage(formIsOrgAdmin ? 'Usuario criado como Admin da Organizacao com acesso a todos os setores.' : 'Usuario criado e vinculado aos setores selecionados.');
       await refetch();
+      await confirm({
+        title: 'Usuario criado',
+        description: `O usuario "${form.name}" foi criado com sucesso.`,
+        confirmLabel: 'OK',
+        hideCancel: true,
+        tone: 'success'
+      });
     } catch (err: any) {
       setMessage(err?.response?.data?.message || 'Nao foi possivel criar o usuario.');
     } finally {
@@ -226,6 +257,17 @@ export function UsersPage() {
     if (!editing) return;
     const sectorIds = editIsOrgAdmin ? allSectorIds : editForm.sectorIds;
     if (!sectorIds.length) { setMessage('O usuario precisa ter pelo menos um setor.'); return; }
+    const confirmed = await confirm({
+      title: 'Salvar alteracoes do usuario?',
+      description: `As permissoes e dados de "${editForm.name || editing.name}" serao atualizados.`,
+      details: [
+        editIsOrgAdmin ? 'Perfil Admin da Organizacao: acesso a todos os setores.' : `${sectorIds.length} setor(es) selecionado(s).`,
+        editForm.password.trim() ? 'A senha tambem sera redefinida.' : 'A senha nao sera alterada.'
+      ],
+      confirmLabel: 'Sim, salvar',
+      tone: 'warning'
+    });
+    if (!confirmed) return;
     setLoading(true);
     setMessage('');
     try {
@@ -242,6 +284,13 @@ export function UsersPage() {
       setMessage(editIsOrgAdmin ? 'Usuario atualizado com acesso a todos os setores.' : 'Usuario atualizado com sucesso.');
       setEditing(null);
       await refetch();
+      await confirm({
+        title: 'Usuario atualizado',
+        description: `As alteracoes de "${editForm.name || editing.name}" foram salvas com sucesso.`,
+        confirmLabel: 'OK',
+        hideCancel: true,
+        tone: 'success'
+      });
     } catch (err: any) {
       setMessage(err?.response?.data?.message || 'Nao foi possivel atualizar o usuario.');
     } finally {
@@ -252,11 +301,24 @@ export function UsersPage() {
   async function removeUser(user: any) {
     const targetOrgId = currentUser?.isSuperAdmin ? userOrganization(user)?.id || selectedUserOrganizationId : undefined;
     const name = user.name;
-    if (!window.confirm(`Remover acesso de "${name}" desta organizacao?`)) return;
+    const confirmed = await confirm({
+      title: 'Remover acesso do usuario?',
+      description: `Tem certeza que deseja remover/inativar o acesso de "${name}" nesta organizacao?`,
+      confirmLabel: 'Sim, remover',
+      tone: 'danger'
+    });
+    if (!confirmed) return;
     try {
       await api.users.remove(user.id, targetOrgId ? { organizationId: targetOrgId } : {});
       setMessage('Usuario removido/inativado nesta organizacao.');
       await refetch();
+      await confirm({
+        title: 'Acesso removido',
+        description: `O acesso de "${name}" foi removido/inativado com sucesso.`,
+        confirmLabel: 'OK',
+        hideCancel: true,
+        tone: 'success'
+      });
     } catch (err: any) {
       setMessage(err?.response?.data?.message || 'Nao foi possivel remover o usuario.');
     }
@@ -264,11 +326,17 @@ export function UsersPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <p className="eyebrow">Administracao</p>
-        <h2 className="page-title">Usuarios, permissoes e setores</h2>
-        <p className="mt-2 max-w-3xl text-sm text-slate-500">Defina perfil e setores. O usuario so vera dashboards, modelos e datasets dos setores liberados.</p>
-      </div>
+      <section className="dashboard-gallery-hero selection-hero selection-hero-users">
+        <div className="dashboard-gallery-hero-content">
+          <p className="eyebrow text-white/80">Easy BI Workspace</p>
+          <h3>Gerencie acessos e permissoes</h3>
+          <p>Cadastre usuarios, defina perfis e controle setores para liberar apenas os dados certos para cada pessoa.</p>
+        </div>
+        <div className="selection-hero-actions">
+          <span className="selection-hero-pill"><Users size={15} /> {users.length} usuarios</span>
+          <span className="selection-hero-pill"><ShieldCheck size={15} /> Perfis e setores</span>
+        </div>
+      </section>
 
       {currentUser?.isSuperAdmin && (
         <section className="card-premium p-5">
@@ -477,7 +545,7 @@ export function UsersPage() {
                         placeholder="Preencha somente se quiser resetar a senha"
                       />
                     </div>
-                    <button type="button" onClick={() => setEditForm({ ...editForm, password: 'EasyBI@123' })} className="btn-muted">Gerar padrao</button>
+                    <button type="button" onClick={() => setEditForm({ ...editForm, password: generateTemporaryPassword() })} className="btn-muted">Gerar senha</button>
                   </div>
                 </label>
               </div>

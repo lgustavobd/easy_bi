@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Building2, CheckCircle2, ChevronLeft, ChevronRight, Database, Download, Eye, FileSpreadsheet, FolderSync, PlusCircle, RefreshCw, Search, Table2, Trash2, UploadCloud, Wand2, X } from 'lucide-react';
+import { Building2, CheckCircle2, ChevronLeft, ChevronRight, Database, Download, Eye, FileSpreadsheet, FolderSync, PlusCircle, RefreshCw, Search, Sparkles, Table2, Trash2, UploadCloud, Wand2, X } from 'lucide-react';
 import { api } from '../../api/resources.api';
+import { TemplateMetricsModal } from '../import-templates/TemplatesPage';
 import { useAuthStore } from '../../store/auth.store';
+import { planBlockedMessage, planFeature } from '../../utils/plan';
+import { useConfirm } from '../../components/ConfirmDialog';
 
 type DatasetTab = 'new' | 'update' | 'append' | 'patch';
-type DatasetScreen = 'list' | 'load';
+type DatasetScreen = 'list' | 'new' | 'load';
 
 const typeLabel: Record<string, string> = {
   TEXT: 'Texto', NUMBER: 'Número', DATE: 'Data', BOOLEAN: 'Booleano', CURRENCY: 'Moeda', PERCENTAGE: 'Percentual'
@@ -16,6 +19,30 @@ function columnTypeLabel(column: any) {
   const config = column?.formatConfig || {};
   if (config.valueKind === 'DURATION' || config.type === 'duration') return 'Horas / duracao';
   return typeLabel[column?.dataType] || column?.dataType;
+}
+
+function asList(value: any): string[] {
+  if (Array.isArray(value)) return value.map((item) => String(item || '').trim()).filter(Boolean);
+  const single = String(value || '').trim();
+  return single ? [single] : [];
+}
+
+function templateForDataset(dataset: any, templates: any[]) {
+  return templates.find((template: any) => (
+    template?.id === dataset?.importTemplateId ||
+    (Array.isArray(template?.datasets) && template.datasets.some((item: any) => item?.id === dataset?.id))
+  ));
+}
+
+function summarizeList(values: string[], fallback = '-') {
+  if (!values.length) return fallback;
+  const visible = values.slice(0, 4).join(', ');
+  return values.length > 4 ? `${visible} +${values.length - 4}` : visible;
+}
+
+function summarizeCount(values: string[], singular: string, plural: string) {
+  const count = values.length;
+  return `${count} ${count === 1 ? singular : plural}`;
 }
 
 function forceModalViewportTop() {
@@ -181,11 +208,14 @@ function DatasetPreviewModal({ dataset, onClose }: { dataset: any; onClose: () =
 export function DatasetUploadPage() {
   const user = useAuthStore(s => s.user);
   const organization = useAuthStore(s => s.organization);
+  const confirm = useConfirm();
   const allowed = canManageDataset(user, organization);
+  const canAppendRows = planFeature(organization, 'canUseAppendRows');
+  const canPatchRows = planFeature(organization, 'canUsePatchRows');
+  const canUseCalculatedMetrics = planFeature(organization, 'canUseCalculatedMetrics');
   const [screen, setScreen] = useState<DatasetScreen>('list');
   const [tab, setTab] = useState<DatasetTab>('new');
   const [file, setFile] = useState<File | null>(null);
-  const [templateId, setTemplateId] = useState('');
   const [sectorId, setSectorId] = useState('');
   const [datasetName, setDatasetName] = useState('');
   const [saveTemplate, setSaveTemplate] = useState(true);
@@ -205,6 +235,8 @@ export function DatasetUploadPage() {
   const [patchSheetName, setPatchSheetName] = useState('');
   const [sheetLoading, setSheetLoading] = useState<DatasetTab | ''>('');
   const [previewDataset, setPreviewDataset] = useState<any>(null);
+  const [editingTemplate, setEditingTemplate] = useState<any>(null);
+  const [metricsLoadingId, setMetricsLoadingId] = useState('');
   const [result, setResult] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
@@ -212,7 +244,7 @@ export function DatasetUploadPage() {
   const [datasetSearch, setDatasetSearch] = useState('');
 
   const { data: datasets = [], refetch } = useQuery({ queryKey: ['datasets'], queryFn: api.datasets.list });
-  const { data: templates = [] } = useQuery({ queryKey: ['import-templates'], queryFn: api.templates.list });
+  const { data: templates = [], refetch: refetchTemplates } = useQuery({ queryKey: ['import-templates'], queryFn: api.templates.list });
   const { data: sectors = [] } = useQuery({ queryKey: ['sectors', organization?.id], queryFn: api.sectors.list, enabled: Boolean(organization?.id) });
 
   const columns = useMemo(() => result?.columns || [], [result]);
@@ -326,6 +358,10 @@ export function DatasetUploadPage() {
   }
 
   function switchToAppend(dataset?: any) {
+    if (!canAppendRows) {
+      setError(planBlockedMessage(organization, 'incluir novas linhas em datasets'));
+      return;
+    }
     setScreen('load');
     setTab('append');
     setError('');
@@ -334,6 +370,10 @@ export function DatasetUploadPage() {
   }
 
   function switchToPatch(dataset?: any) {
+    if (!canPatchRows) {
+      setError(planBlockedMessage(organization, 'atualizar linhas especificas'));
+      return;
+    }
     setScreen('load');
     setTab('patch');
     setError('');
@@ -346,14 +386,50 @@ export function DatasetUploadPage() {
     openAfterViewportTop(() => setPreviewDataset(dataset));
   }
 
+  async function openDatasetMetrics(dataset: any) {
+    if (!canUseCalculatedMetrics) {
+      setError(planBlockedMessage(organization, 'criar ou editar metricas calculadas'));
+      return;
+    }
+
+    setError('');
+    setMetricsLoadingId(dataset.id);
+    try {
+      const existingTemplate = templateForDataset(dataset, templates);
+      const template = existingTemplate || await api.datasets.ensureImportTemplate(dataset.id);
+      await refetchTemplates();
+      if (!existingTemplate) await refetch();
+      openAfterViewportTop(() => setEditingTemplate({
+        ...template,
+        datasets: Array.isArray(template.datasets) && template.datasets.some((item: any) => item.id === dataset.id)
+          ? template.datasets
+          : [dataset, ...(template.datasets || [])]
+      }));
+    } catch (err: any) {
+      setError(err?.response?.data?.message || 'Nao foi possivel abrir as metricas deste dataset.');
+    } finally {
+      setMetricsLoadingId('');
+    }
+  }
+
   async function submit() {
     if (!file || nameExists) return;
+    const confirmed = await confirm({
+      title: 'Importar novo dataset?',
+      description: `O arquivo "${file.name}" sera analisado e salvo como dataset "${normalizedDatasetName || file.name.replace(/\.[^.]+$/, '')}".`,
+      details: [
+        saveTemplate ? 'Um modelo reutilizavel sera salvo junto com esta carga.' : 'Nenhum modelo reutilizavel sera salvo nesta carga.',
+        newSheetName ? `Aba selecionada: ${newSheetName}` : 'Arquivo sem aba especifica selecionada.'
+      ],
+      confirmLabel: 'Sim, importar',
+      tone: 'success'
+    });
+    if (!confirmed) return;
     setLoading(true); setError(''); setMessage('');
     try {
       const form = new FormData();
       form.append('file', file);
       form.append('name', normalizedDatasetName || file.name.replace(/\.[^.]+$/, ''));
-      if (templateId) form.append('templateId', templateId);
       if (saveTemplate) form.append('saveTemplate', 'true');
       if (templateName) form.append('templateName', templateName);
       if (sectorId) form.append('sectorId', sectorId);
@@ -366,6 +442,14 @@ export function DatasetUploadPage() {
       setNewSheets([]);
       setNewSheetName('');
       await refetch();
+      await refetchTemplates();
+      await confirm({
+        title: 'Dataset importado',
+        description: `O dataset "${normalizedDatasetName || response?.name || file.name}" foi importado e analisado com sucesso.`,
+        confirmLabel: 'OK',
+        hideCancel: true,
+        tone: 'success'
+      });
     } catch (err: any) {
       const sheetPayload = sheetErrorPayload(err);
       if (sheetPayload) {
@@ -379,12 +463,25 @@ export function DatasetUploadPage() {
   }
 
   async function removeDataset(id: string, name: string) {
-    if (!window.confirm(`Excluir o dataset "${name}"? Os dashboards que usam esse dataset podem ficar sem dados.`)) return;
+    const confirmed = await confirm({
+      title: 'Excluir dataset?',
+      description: `Tem certeza que deseja excluir o dataset "${name}"? Os dashboards que usam esse dataset podem ficar sem dados.`,
+      confirmLabel: 'Sim, excluir',
+      tone: 'danger'
+    });
+    if (!confirmed) return;
     try {
       await api.datasets.remove(id);
       setMessage('Dataset excluído com sucesso.');
       if (replaceDatasetId === id) setReplaceDatasetId('');
       await refetch();
+      await confirm({
+        title: 'Dataset excluido',
+        description: `O dataset "${name}" foi excluido com sucesso.`,
+        confirmLabel: 'OK',
+        hideCancel: true,
+        tone: 'success'
+      });
     } catch (err: any) { setError(err?.response?.data?.message || 'Não foi possível excluir o dataset.'); }
   }
 
@@ -397,6 +494,17 @@ export function DatasetUploadPage() {
 
   async function replaceDataset() {
     if (!replaceDatasetId || !replaceFile) return;
+    const confirmed = await confirm({
+      title: 'Atualizar dataset existente?',
+      description: `O dataset "${selectedReplaceDataset?.name || 'selecionado'}" sera substituido pelo arquivo "${replaceFile.name}". Os dashboards conectados passam a usar os novos dados.`,
+      details: [
+        'Essa opcao mantem o ID do dataset.',
+        replaceSheetName ? `Aba selecionada: ${replaceSheetName}` : 'Arquivo sem aba especifica selecionada.'
+      ],
+      confirmLabel: 'Sim, atualizar',
+      tone: 'warning'
+    });
+    if (!confirmed) return;
     setLoading(true); setError(''); setMessage('');
     try {
       const form = new FormData();
@@ -409,6 +517,13 @@ export function DatasetUploadPage() {
       setReplaceSheets([]);
       setReplaceSheetName('');
       await refetch();
+      await confirm({
+        title: 'Dataset atualizado',
+        description: `O dataset "${selectedReplaceDataset?.name || 'selecionado'}" foi atualizado com sucesso.`,
+        confirmLabel: 'OK',
+        hideCancel: true,
+        tone: 'success'
+      });
     } catch (err: any) {
       const sheetPayload = sheetErrorPayload(err);
       if (sheetPayload) {
@@ -424,6 +539,18 @@ export function DatasetUploadPage() {
 
   async function appendDatasetRows() {
     if (!replaceDatasetId || !appendFile) return;
+    if (!canAppendRows) { setError(planBlockedMessage(organization, 'incluir novas linhas em datasets')); return; }
+    const confirmed = await confirm({
+      title: 'Incluir novas linhas?',
+      description: `As linhas do arquivo "${appendFile.name}" serao adicionadas ao final do dataset "${selectedReplaceDataset?.name || 'selecionado'}", sem apagar o que ja existe.`,
+      details: [
+        'O arquivo precisa seguir as colunas do dataset.',
+        appendSheetName ? `Aba selecionada: ${appendSheetName}` : 'Arquivo sem aba especifica selecionada.'
+      ],
+      confirmLabel: 'Sim, incluir',
+      tone: 'success'
+    });
+    if (!confirmed) return;
     setLoading(true); setError(''); setMessage('');
     try {
       const form = new FormData();
@@ -437,6 +564,13 @@ export function DatasetUploadPage() {
       setAppendSheets([]);
       setAppendSheetName('');
       await refetch();
+      await confirm({
+        title: 'Linhas incluidas',
+        description: `Inclusao concluida no dataset "${selectedReplaceDataset?.name || 'selecionado'}".`,
+        confirmLabel: 'OK',
+        hideCancel: true,
+        tone: 'success'
+      });
     } catch (err: any) {
       const sheetPayload = sheetErrorPayload(err);
       if (sheetPayload) {
@@ -451,6 +585,18 @@ export function DatasetUploadPage() {
 
   async function patchDatasetRows() {
     if (!replaceDatasetId || !patchFile || !patchMatchColumn) return;
+    if (!canPatchRows) { setError(planBlockedMessage(organization, 'atualizar linhas especificas')); return; }
+    const confirmed = await confirm({
+      title: 'Atualizar linhas especificas?',
+      description: `O arquivo "${patchFile.name}" atualizara somente registros encontrados no dataset "${selectedReplaceDataset?.name || 'selecionado'}".`,
+      details: [
+        `Coluna-chave: ${patchMatchColumn}`,
+        patchSheetName ? `Aba selecionada: ${patchSheetName}` : 'Arquivo sem aba especifica selecionada.'
+      ],
+      confirmLabel: 'Sim, atualizar linhas',
+      tone: 'warning'
+    });
+    if (!confirmed) return;
     setLoading(true); setError(''); setMessage('');
     try {
       const form = new FormData();
@@ -466,6 +612,13 @@ export function DatasetUploadPage() {
       setPatchSheets([]);
       setPatchSheetName('');
       await refetch();
+      await confirm({
+        title: 'Linhas atualizadas',
+        description: `Atualizacao por chave concluida no dataset "${selectedReplaceDataset?.name || 'selecionado'}".`,
+        confirmLabel: 'OK',
+        hideCancel: true,
+        tone: 'success'
+      });
     } catch (err: any) {
       const sheetPayload = sheetErrorPayload(err);
       if (sheetPayload) {
@@ -489,16 +642,19 @@ export function DatasetUploadPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="eyebrow">Datasets</p>
-          <h2 className="page-title">Importação e atualização de dados</h2>
-          <p className="mt-2 max-w-3xl text-sm text-slate-500">Crie um dataset novo com nome único, atualize um existente pelo modelo CSV e use a lupa para conferir os dados importados.</p>
+      <section className="dashboard-gallery-hero selection-hero selection-hero-datasets">
+        <div className="dashboard-gallery-hero-content">
+          <p className="eyebrow text-white/80">Easy BI Workspace</p>
+          <h3>Organize suas bases de dados</h3>
+          <p>Crie datasets novos, atualize arquivos existentes e confira os dados importados antes de construir dashboards.</p>
         </div>
-        <OrgBadge organization={organization} />
-      </div>
+        <div className="selection-hero-actions">
+          <span className="selection-hero-pill"><Building2 size={15} /> {organization?.name || 'Global SaaS'}</span>
+          <span className="selection-hero-pill"><Database size={15} /> {datasets.length} datasets</span>
+        </div>
+      </section>
 
-      <section className="grid gap-3 md:grid-cols-2">
+      <section className="grid gap-3 md:grid-cols-3">
         <button type="button" onClick={() => setScreen('list')} className={`rounded-[1.5rem] border p-5 text-left transition ${screen === 'list' ? 'border-primary bg-primary-soft shadow-sm' : 'border-slate-200 bg-white hover:border-primary/40 hover:bg-primary-soft/40'}`}>
           <div className="flex items-center gap-3">
             <div className={`rounded-2xl p-3 ${screen === 'list' ? 'bg-primary text-white' : 'bg-slate-100 text-slate-600'}`}><Database size={20} /></div>
@@ -508,12 +664,21 @@ export function DatasetUploadPage() {
             </div>
           </div>
         </button>
-        <button type="button" onClick={() => setScreen('load')} className={`rounded-[1.5rem] border p-5 text-left transition ${screen === 'load' ? 'border-primary bg-primary-soft shadow-sm' : 'border-slate-200 bg-white hover:border-primary/40 hover:bg-primary-soft/40'}`}>
+        <button type="button" onClick={() => { setScreen('new'); setTab('new'); }} className={`rounded-[1.5rem] border p-5 text-left transition ${screen === 'new' ? 'border-primary bg-primary-soft shadow-sm' : 'border-slate-200 bg-white hover:border-primary/40 hover:bg-primary-soft/40'}`}>
+          <div className="flex items-center gap-3">
+            <div className={`rounded-2xl p-3 ${screen === 'new' ? 'bg-primary text-white' : 'bg-slate-100 text-slate-600'}`}><UploadCloud size={20} /></div>
+            <div>
+              <p className="font-black text-slate-950">Novo dataset</p>
+              <p className="mt-1 text-xs font-bold text-slate-500">Crie uma base nova para dashboards.</p>
+            </div>
+          </div>
+        </button>
+        <button type="button" onClick={() => { setScreen('load'); if (tab === 'new') setTab('update'); }} className={`rounded-[1.5rem] border p-5 text-left transition ${screen === 'load' ? 'border-primary bg-primary-soft shadow-sm' : 'border-slate-200 bg-white hover:border-primary/40 hover:bg-primary-soft/40'}`}>
           <div className="flex items-center gap-3">
             <div className={`rounded-2xl p-3 ${screen === 'load' ? 'bg-primary text-white' : 'bg-slate-100 text-slate-600'}`}><FolderSync size={20} /></div>
             <div>
               <p className="font-black text-slate-950">Atualizar dados</p>
-              <p className="mt-1 text-xs font-bold text-slate-500">Criar, substituir, incluir linhas ou atualizar por chave.</p>
+              <p className="mt-1 text-xs font-bold text-slate-500">Substituir, incluir linhas ou atualizar por chave.</p>
             </div>
           </div>
         </button>
@@ -542,55 +707,76 @@ export function DatasetUploadPage() {
           <div className="dataset-list-scroll mt-4">
             {!datasets.length && <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5 text-sm font-bold text-slate-500">Nenhum dataset nesta organizacao.</div>}
             {Boolean(datasets.length && !filteredDatasets.length) && <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5 text-sm font-bold text-slate-500">Nenhum dataset encontrado para esse filtro.</div>}
-            {filteredDatasets.map((dataset: any) => (
-              <div key={dataset.id} className="dataset-list-card">
-                <div className="dataset-list-info"><div className="rounded-xl bg-primary-soft p-2 text-primary"><Database size={17} /></div><div className="min-w-0 flex-1"><p className="font-black text-slate-950">{dataset.name}</p><p className="text-xs font-semibold text-slate-500"><span className="font-black text-slate-600">Organizacao:</span> {organization?.name || dataset.organization?.name || 'Org'} - Setor: {dataset.sector?.name || 'Sem setor'}</p></div></div>
-                <div className="dataset-list-meta">
-                  <span>{Number(dataset.rowCount || 0).toLocaleString('pt-BR')} linhas</span>
-                  <span>{dataset.status}</span>
+            {filteredDatasets.map((dataset: any) => {
+              const linkedTemplate = templateForDataset(dataset, templates);
+              const templateMetrics = asList(linkedTemplate?.metrics);
+              const templateDimensions = asList(linkedTemplate?.dimensions);
+              return (
+              <div key={dataset.id} className="dataset-list-card dataset-list-card-readable">
+                <div className="dataset-card-head">
+                  <div className="dataset-list-info">
+                    <div className="rounded-xl bg-primary-soft p-2 text-primary"><Database size={17} /></div>
+                    <div className="min-w-0 flex-1">
+                      <p className="dataset-card-title">{dataset.name}</p>
+                      <p className="dataset-card-subtitle"><span>Organizacao:</span> {organization?.name || dataset.organization?.name || 'Org'} - Setor: {dataset.sector?.name || 'Sem setor'}</p>
+                    </div>
+                  </div>
+                  <div className="dataset-list-meta">
+                    <span>{Number(dataset.rowCount || 0).toLocaleString('pt-BR')} linhas</span>
+                    <span>{(dataset.columns || []).length} colunas</span>
+                    <span>{dataset.status}</span>
+                  </div>
+                </div>
+                <div className="dataset-template-summary">
+                  <div><span>Modelo</span><strong>{linkedTemplate?.name || 'Criar ao abrir metricas'}</strong></div>
+                  <div><span>Metricas</span><strong>{summarizeCount(templateMetrics, 'metrica', 'metricas')}</strong></div>
+                  <div><span>Dimensoes</span><strong>{summarizeCount(templateDimensions, 'dimensao', 'dimensoes')}</strong></div>
                 </div>
                 <div className="dataset-list-actions">
-                  <button onClick={() => openDatasetPreview(dataset)} className="btn-muted min-w-0 px-3 py-2 text-xs"><Eye size={14} /> Lupa</button>
-                  <button onClick={() => downloadTemplate(dataset.id, dataset.name)} className="btn-muted min-w-0 px-3 py-2 text-xs"><Download size={14} /> Modelo</button>
-                  <button onClick={() => switchToUpdate(dataset)} className="btn-muted min-w-0 px-3 py-2 text-xs"><RefreshCw size={14} /> Atualizar</button>
-                  <button onClick={() => switchToAppend(dataset)} className="btn-muted min-w-0 px-3 py-2 text-xs"><PlusCircle size={14} /> Incluir</button>
-                  <button onClick={() => switchToPatch(dataset)} className="btn-muted min-w-0 px-3 py-2 text-xs"><RefreshCw size={14} /> Linhas</button>
-                  <button onClick={() => removeDataset(dataset.id, dataset.name)} className="btn-danger min-w-0 px-3 py-2 text-xs"><Trash2 size={14} /> Excluir</button>
+                  <button onClick={() => openDatasetPreview(dataset)} className="btn-muted dataset-action-btn dataset-action-preview min-w-0 px-3 py-2 text-xs"><Eye size={14} /> Lupa</button>
+                  <button disabled={!canUseCalculatedMetrics || metricsLoadingId === dataset.id} onClick={() => openDatasetMetrics(dataset)} className="btn-primary dataset-action-btn dataset-action-metrics min-w-0 px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40"><Sparkles size={14} /> {metricsLoadingId === dataset.id ? 'Abrindo...' : 'Colunas'}</button>
+                  <button onClick={() => downloadTemplate(dataset.id, dataset.name)} className="btn-muted dataset-action-btn dataset-action-model min-w-0 px-3 py-2 text-xs"><Download size={14} /> Modelo</button>
+                  <button onClick={() => switchToUpdate(dataset)} className="btn-muted dataset-action-btn dataset-action-update min-w-0 px-3 py-2 text-xs"><RefreshCw size={14} /> Atualizar</button>
+                  <button disabled={!canAppendRows} onClick={() => switchToAppend(dataset)} className="btn-muted dataset-action-btn dataset-action-append min-w-0 px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40"><PlusCircle size={14} /> Incluir</button>
+                  <button disabled={!canPatchRows} onClick={() => switchToPatch(dataset)} className="btn-muted dataset-action-btn dataset-action-patch min-w-0 px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40"><RefreshCw size={14} /> Linhas</button>
+                  <button onClick={() => removeDataset(dataset.id, dataset.name)} className="btn-danger dataset-action-btn dataset-action-delete min-w-0 px-3 py-2 text-xs"><Trash2 size={14} /> Excluir</button>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </section>}
 
-      {screen === 'load' && <>
-      <div className="dataset-load-shell">
+      {(screen === 'new' || screen === 'load') && <>
+      <div className={`dataset-load-shell ${screen === 'load' ? 'dataset-load-shell-compact' : ''}`}>
         <div className="dataset-load-heading">
           <div>
             <p className="text-xs font-black uppercase tracking-[0.18em] text-primary">Carga de dados</p>
-            <h3 className="mt-1 text-xl font-black text-slate-950">Escolha como quer enviar ou atualizar os dados</h3>
+            <h3 className="mt-1 text-xl font-black text-slate-950">{screen === 'new' ? 'Importar novo dataset' : 'Escolha como quer atualizar os dados'}</h3>
           </div>
-          <p className="text-sm font-semibold text-slate-500">Use os cards abaixo para escolher o tipo de carga. Para consultar a base, volte em Ver datasets.</p>
+          {screen === 'new' && <p className="text-sm font-semibold text-slate-500">Envie CSV ou Excel para criar uma nova base. Para consultar bases existentes, volte em Ver datasets.</p>}
         </div>
 
-        <div className="dataset-mode-grid">
-        <button type="button" onClick={() => setTab('new')} className={`dataset-mode-card ${tab === 'new' ? 'dataset-mode-card-active' : ''}`}>
+        {screen === 'load' && <div className="dataset-mode-grid">
+        {false && <button type="button" onClick={() => setTab('new')} className={`dataset-mode-card ${tab === 'new' ? 'dataset-mode-card-active' : ''}`}>
           <div className="dataset-mode-icon"><UploadCloud size={22} /></div>
           <div><strong>Novo dataset</strong><span>Cria uma nova base para dashboards, sem aceitar nome duplicado na organização.</span></div>
-        </button>
+        </button>}
         <button type="button" onClick={() => switchToUpdate()} className={`dataset-mode-card ${tab === 'update' ? 'dataset-mode-card-active' : ''}`}>
           <div className="dataset-mode-icon"><FolderSync size={22} /></div>
           <div><strong>Atualizar existente</strong><span>Baixe o modelo, substitua as linhas e mantenha os dashboards conectados.</span></div>
         </button>
-        <button type="button" onClick={() => switchToAppend()} className={`dataset-mode-card ${tab === 'append' ? 'dataset-mode-card-active' : ''}`}>
+        <button type="button" disabled={!canAppendRows} onClick={() => switchToAppend()} className={`dataset-mode-card disabled:cursor-not-allowed disabled:opacity-45 ${tab === 'append' ? 'dataset-mode-card-active' : ''}`}>
           <div className="dataset-mode-icon"><PlusCircle size={22} /></div>
           <div><strong>Incluir linhas</strong><span>Adiciona novas linhas ao final do dataset, sem apagar o que ja existe.</span></div>
         </button>
-        <button type="button" onClick={() => switchToPatch()} className={`dataset-mode-card ${tab === 'patch' ? 'dataset-mode-card-active' : ''}`}>
+        <button type="button" disabled={!canPatchRows} onClick={() => switchToPatch()} className={`dataset-mode-card disabled:cursor-not-allowed disabled:opacity-45 ${tab === 'patch' ? 'dataset-mode-card-active' : ''}`}>
           <div className="dataset-mode-icon"><RefreshCw size={22} /></div>
           <div><strong>Atualizar linhas</strong><span>Altere somente registros encontrados por uma coluna-chave, sem truncar a base.</span></div>
         </button>
-      </div>
+      </div>}
+      {screen === 'load' && (!canAppendRows || !canPatchRows) && <p className="mt-3 rounded-2xl bg-amber-50 p-3 text-xs font-bold text-amber-700">Algumas opcoes de atualizacao estao bloqueadas pelo plano atual da organizacao.</p>}
 
       </div>
 
@@ -614,7 +800,9 @@ export function DatasetUploadPage() {
                   </button>
                 )}
                 <div><label className="label">Setor</label><select className="input" value={sectorId} onChange={e => setSectorId(e.target.value)}><option value="">Selecione o setor</option>{sectors.map((sector: any) => <option key={sector.id} value={sector.id}>{sector.name}</option>)}</select></div>
+                {/*
                 <div><label className="label">Modelo de importação</label><select className="input" value={templateId} onChange={e => setTemplateId(e.target.value)}><option value="">Detectar automaticamente</option>{templates.map((template: any) => <option key={template.id} value={template.id}>{template.name}</option>)}</select></div>
+                */}
                 {sheetLoading === 'new' && <p className="text-xs font-bold text-slate-500">Lendo abas do Excel...</p>}
                 {newSheets.length > 1 && (
                   <div>
@@ -667,7 +855,7 @@ export function DatasetUploadPage() {
               </div>
               <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(260px,1fr)_auto]">
                 <label><span className="form-label">Arquivo para incluir</span><span className="form-select mt-1 flex cursor-pointer items-center gap-2"><FileSpreadsheet size={16} /> <span className="truncate">{appendFile?.name || 'Selecionar CSV/Excel com novas linhas'}</span><input type="file" accept=".csv,.xls,.xlsx" className="hidden" onChange={e => handleAppendFile(e.target.files?.[0] || null)} /></span></label>
-                <button className="btn-primary self-end" disabled={!replaceDatasetId || !appendFile || loading || sheetLoading === 'append'} onClick={appendDatasetRows}>{loading ? 'Incluindo...' : 'Incluir linhas'}</button>
+                <button className="btn-primary self-end" disabled={!canAppendRows || !replaceDatasetId || !appendFile || loading || sheetLoading === 'append'} onClick={appendDatasetRows}>{loading ? 'Incluindo...' : 'Incluir linhas'}</button>
               </div>
               {sheetLoading === 'append' && <p className="mt-3 text-xs font-bold text-slate-500">Lendo abas do Excel...</p>}
               {appendSheets.length > 1 && (
@@ -696,7 +884,7 @@ export function DatasetUploadPage() {
               <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(220px,0.8fr)_minmax(260px,1fr)_auto]">
                 <label><span className="form-label">Coluna-chave</span><select className="form-select mt-1" value={patchMatchColumn} onChange={e => setPatchMatchColumn(e.target.value)} disabled={!patchMatchColumns.length}><option value="">Escolha a chave</option>{patchMatchColumns.map((column: any) => <option key={column.id || column.name} value={column.name}>{column.originalName || column.name}</option>)}</select></label>
                 <label><span className="form-label">Arquivo com linhas especificas</span><span className="form-select mt-1 flex cursor-pointer items-center gap-2"><FileSpreadsheet size={16} /> <span className="truncate">{patchFile?.name || 'Selecionar CSV/Excel parcial'}</span><input type="file" accept=".csv,.xls,.xlsx" className="hidden" onChange={e => handlePatchFile(e.target.files?.[0] || null)} /></span></label>
-                <button className="btn-primary self-end" disabled={!replaceDatasetId || !patchFile || !patchMatchColumn || loading || sheetLoading === 'patch'} onClick={patchDatasetRows}>{loading ? 'Atualizando...' : 'Atualizar linhas'}</button>
+                <button className="btn-primary self-end" disabled={!canPatchRows || !replaceDatasetId || !patchFile || !patchMatchColumn || loading || sheetLoading === 'patch'} onClick={patchDatasetRows}>{loading ? 'Atualizando...' : 'Atualizar linhas'}</button>
               </div>
               {sheetLoading === 'patch' && <p className="mt-3 text-xs font-bold text-slate-500">Lendo abas do Excel...</p>}
               {patchSheets.length > 1 && (
@@ -740,12 +928,12 @@ export function DatasetUploadPage() {
                     <span>{dataset.status}</span>
                   </div>
                   <div className="dataset-list-actions">
-                    <button onClick={() => openDatasetPreview(dataset)} className="btn-muted min-w-0 px-3 py-2 text-xs"><Eye size={14} /> Lupa</button>
-                    <button onClick={() => downloadTemplate(dataset.id, dataset.name)} className="btn-muted min-w-0 px-3 py-2 text-xs"><Download size={14} /> Modelo</button>
-                    <button onClick={() => switchToUpdate(dataset)} className="btn-muted min-w-0 px-3 py-2 text-xs"><RefreshCw size={14} /> Atualizar</button>
-                    <button onClick={() => switchToAppend(dataset)} className="btn-muted min-w-0 px-3 py-2 text-xs"><PlusCircle size={14} /> Incluir</button>
-                    <button onClick={() => switchToPatch(dataset)} className="btn-muted min-w-0 px-3 py-2 text-xs"><RefreshCw size={14} /> Linhas</button>
-                    <button onClick={() => removeDataset(dataset.id, dataset.name)} className="btn-danger min-w-0 px-3 py-2 text-xs"><Trash2 size={14} /> Excluir</button>
+                    <button onClick={() => openDatasetPreview(dataset)} className="btn-muted dataset-action-btn dataset-action-preview min-w-0 px-3 py-2 text-xs"><Eye size={14} /> Lupa</button>
+                    <button onClick={() => downloadTemplate(dataset.id, dataset.name)} className="btn-muted dataset-action-btn dataset-action-model min-w-0 px-3 py-2 text-xs"><Download size={14} /> Modelo</button>
+                    <button onClick={() => switchToUpdate(dataset)} className="btn-muted dataset-action-btn dataset-action-update min-w-0 px-3 py-2 text-xs"><RefreshCw size={14} /> Atualizar</button>
+                    <button disabled={!canAppendRows} onClick={() => switchToAppend(dataset)} className="btn-muted dataset-action-btn dataset-action-append min-w-0 px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40"><PlusCircle size={14} /> Incluir</button>
+                    <button disabled={!canPatchRows} onClick={() => switchToPatch(dataset)} className="btn-muted dataset-action-btn dataset-action-patch min-w-0 px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40"><RefreshCw size={14} /> Linhas</button>
+                    <button onClick={() => removeDataset(dataset.id, dataset.name)} className="btn-danger dataset-action-btn dataset-action-delete min-w-0 px-3 py-2 text-xs"><Trash2 size={14} /> Excluir</button>
                   </div>
                 </div>
               ))}
@@ -756,6 +944,20 @@ export function DatasetUploadPage() {
       </>}
 
       {previewDataset && <DatasetPreviewModal dataset={previewDataset} onClose={() => setPreviewDataset(null)} />}
+      {editingTemplate && (
+        <TemplateMetricsModal
+          key={`dataset-metrics-${editingTemplate.id}`}
+          template={editingTemplate}
+          organization={organization}
+          datasets={datasets}
+          onClose={() => setEditingTemplate(null)}
+          onSaved={async () => {
+            setEditingTemplate(null);
+            await refetchTemplates();
+            await refetch();
+          }}
+        />
+      )}
     </div>
   );
 }

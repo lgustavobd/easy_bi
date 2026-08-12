@@ -7,11 +7,17 @@ export function AuditPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <p className="eyebrow">Segurança</p>
-        <h2 className="page-title">Auditoria</h2>
-        <p className="mt-2 max-w-3xl text-sm text-zinc-500">Registro de ações críticas como login, criação de dashboard, uploads, publicações e alterações administrativas.</p>
-      </div>
+      <section className="dashboard-gallery-hero selection-hero selection-hero-audit">
+        <div className="dashboard-gallery-hero-content">
+          <p className="eyebrow text-white/80">Easy BI Workspace</p>
+          <h3>Auditoria</h3>
+          <p>Registro de acoes criticas como login, criacao de dashboard, uploads, publicacoes e alteracoes administrativas.</p>
+        </div>
+        <div className="selection-hero-actions">
+          <span className="selection-hero-pill"><Activity size={15} /> {logs?.length || 0} eventos</span>
+          <span className="selection-hero-pill"><ShieldCheck size={15} /> Rotas protegidas</span>
+        </div>
+      </section>
       <div className="grid gap-5 md:grid-cols-3">
         <div className="card-premium p-5"><Activity className="text-orange-500" /><p className="mt-3 text-3xl font-black">{logs?.length || 0}</p><p className="text-sm text-zinc-500">eventos recentes</p></div>
         <div className="card-premium p-5"><ShieldCheck className="text-orange-500" /><p className="mt-3 text-3xl font-black">Tenant</p><p className="text-sm text-zinc-500">logs filtrados pela organização</p></div>

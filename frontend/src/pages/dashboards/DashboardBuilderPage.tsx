@@ -6,18 +6,21 @@ import GridLayout, { WidthProvider } from 'react-grid-layout';
 import type { Layout } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
-import { ArrowLeft, BarChart3, CheckCircle2, Database, Download, Edit3, Eye, Grid3X3, LayoutTemplate, LineChart, Loader2, Lock, PieChart, Plus, Save, Send, Table2, Trash2, TrendingUp, Unlock, X } from 'lucide-react';
+import { ArrowLeft, BarChart3, CheckCircle2, Database, Download, Edit3, Eye, Grid3X3, LayoutTemplate, LineChart, Loader2, Lock, PieChart, Plus, Save, Table2, Trash2, TrendingUp, Unlock, X } from 'lucide-react';
 import { api } from '../../api/resources.api';
-import { ChartRenderer, FilterRule, TableColumnFormatConfig } from '../../components/dashboard/ChartRenderer';
-import { DashboardFilterBar } from '../../components/dashboard/DashboardFilterBar';
+import { ChartRenderer, FilterRule, TableColumnFormatConfig, ValueFormatConfig } from '../../components/dashboard/ChartRenderer';
+import { DashboardFilterDock } from '../../components/dashboard/DashboardFilterDock';
 import { exportWidgetAsPng } from '../../components/dashboard/export-widget';
 import { useAuthStore } from '../../store/auth.store';
+import { planFeature } from '../../utils/plan';
+import { useConfirm } from '../../components/ConfirmDialog';
 
 const ResponsiveGridLayout = WidthProvider(GridLayout);
 
 type WidgetType = 'KPI' | 'BAR_CHART' | 'LINE_CHART' | 'DONUT_CHART' | 'TABLE';
 type VisualType = WidgetType | 'AREA_CHART' | 'HORIZONTAL_BAR' | 'PIE_CHART' | 'COMBO_CHART' | 'RADAR_CHART' | 'FUNNEL_CHART' | 'TREEMAP_CHART';
 type Aggregation = 'SUM' | 'AVG' | 'COUNT' | 'DISTINCT_COUNT' | 'MIN' | 'MAX';
+type WidgetValueFormat = NonNullable<ValueFormatConfig['type']>;
 
 type WidgetState = {
   id: string;
@@ -32,10 +35,14 @@ type WidgetState = {
   tableColumnFormats: TableColumnFormatConfig;
   aggregation: Aggregation;
   showLegend: boolean;
-  valueFormat: 'auto' | 'number' | 'currency' | 'percentage' | 'percentageDecimal' | 'integer' | 'duration';
+  valueFormat: WidgetValueFormat;
   valuePrefix: string;
   valueSuffix: string;
   valueDecimals: number;
+  secondaryValueFormat: WidgetValueFormat;
+  secondaryValuePrefix: string;
+  secondaryValueSuffix: string;
+  secondaryValueDecimals: number;
   x: number;
   y: number;
   w: number;
@@ -275,7 +282,7 @@ function mergeComboData(primaryData: any, secondaryData: any) {
     rowsByName.set(key, { ...current, secondaryValue: Number(row.value || 0) });
   });
 
-  return { ...primaryData, rows: Array.from(rowsByName.values()) };
+  return { ...primaryData, rows: Array.from(rowsByName.values()), secondaryFormatConfig: secondaryData?.formatConfig };
 }
 
 function widgetFactory(type: WidgetType, partial: Partial<WidgetState> = {}): WidgetState {
@@ -297,6 +304,10 @@ function widgetFactory(type: WidgetType, partial: Partial<WidgetState> = {}): Wi
     valuePrefix: partial.valuePrefix || '',
     valueSuffix: partial.valueSuffix || '',
     valueDecimals: Number(partial.valueDecimals ?? 2),
+    secondaryValueFormat: partial.secondaryValueFormat || 'auto',
+    secondaryValuePrefix: partial.secondaryValuePrefix || '',
+    secondaryValueSuffix: partial.secondaryValueSuffix || '',
+    secondaryValueDecimals: Number(partial.secondaryValueDecimals ?? 2),
     locked: partial.locked ?? false,
     x: Number(partial.x ?? 0),
     y: Number(partial.y ?? 99),
@@ -326,6 +337,10 @@ function normalizeWidget(widget: any, dashboardDataset: any): WidgetState {
     valuePrefix: config.valuePrefix || config.format?.prefix || '',
     valueSuffix: config.valueSuffix || config.format?.suffix || '',
     valueDecimals: Number(config.valueDecimals ?? config.format?.decimals ?? 2),
+    secondaryValueFormat: config.secondaryValueFormat || config.secondaryFormat?.type || 'auto',
+    secondaryValuePrefix: config.secondaryValuePrefix || config.secondaryFormat?.prefix || '',
+    secondaryValueSuffix: config.secondaryValueSuffix || config.secondaryFormat?.suffix || '',
+    secondaryValueDecimals: Number(config.secondaryValueDecimals ?? config.secondaryFormat?.decimals ?? 2),
     locked: Boolean((widget.styleConfig as any)?.locked),
     x: Number(position.x ?? 0),
     y: Number(position.y ?? 0),
@@ -353,8 +368,13 @@ function widgetPayload(widget: WidgetState, datasetId: string) {
       valuePrefix: widget.valuePrefix,
       valueSuffix: widget.valueSuffix,
       valueDecimals: widget.valueDecimals,
+      secondaryValueFormat: isComboVisual(widget) ? widget.secondaryValueFormat : undefined,
+      secondaryValuePrefix: isComboVisual(widget) ? widget.secondaryValuePrefix : undefined,
+      secondaryValueSuffix: isComboVisual(widget) ? widget.secondaryValueSuffix : undefined,
+      secondaryValueDecimals: isComboVisual(widget) ? widget.secondaryValueDecimals : undefined,
       aggregationMode: widget.aggregation === 'DISTINCT_COUNT' ? 'DISTINCT_COUNT' : undefined,
-      format: { type: widget.valueFormat, prefix: widget.valuePrefix, suffix: widget.valueSuffix, decimals: widget.valueDecimals }
+      format: { type: widget.valueFormat, prefix: widget.valuePrefix, suffix: widget.valueSuffix, decimals: widget.valueDecimals },
+      secondaryFormat: isComboVisual(widget) ? { type: widget.secondaryValueFormat, prefix: widget.secondaryValuePrefix, suffix: widget.secondaryValueSuffix, decimals: widget.secondaryValueDecimals } : undefined
     },
     positionConfig: { x: widget.x, y: widget.y, w: widget.w, h: widget.h },
     styleConfig: { frame: widget.frame || 'custom', locked: widget.locked }
@@ -388,7 +408,7 @@ function canEditDashboard(user: any, organization: any) {
   return Boolean(user?.isSuperAdmin || role === 'SUPER_ADMIN' || role === 'ORG_ADMIN' || role === 'EDITOR');
 }
 
-function WidgetCard({ widget, dataset, filters, onEdit, onRemove, onSelect, onToggleLock, selected }: { widget: WidgetState; dataset: any; filters: FilterRule[]; selected: boolean; onEdit: () => void; onRemove: () => void; onSelect: () => void; onToggleLock: () => void }) {
+function WidgetCard({ widget, dataset, filters, canExportCharts, onEdit, onRemove, onSelect, onToggleLock, selected }: { widget: WidgetState; dataset: any; filters: FilterRule[]; canExportCharts: boolean; selected: boolean; onEdit: () => void; onRemove: () => void; onSelect: () => void; onToggleLock: () => void }) {
   const cardRef = useRef<HTMLElement | null>(null);
   const { data, isFetching } = useQuery({
     queryKey: ['dashboard-preview', widget.datasetId, widget.metricColumn, widget.secondaryMetricColumn, widget.dimensionColumn, JSON.stringify(widget.tableColumns || []), widget.aggregation, widget.type, widgetVisualType(widget), JSON.stringify(filters)],
@@ -430,13 +450,13 @@ function WidgetCard({ widget, dataset, filters, onEdit, onRemove, onSelect, onTo
         </div>
         <div className="no-drag flex items-center gap-1">
           <button title={widget.locked ? 'Destravar posição e tamanho' : 'Travar posição e tamanho'} onClick={(event) => { event.stopPropagation(); onToggleLock(); }} className={`rounded-xl border px-2.5 py-2 text-xs font-black transition ${widget.locked ? 'border-primary bg-primary-soft text-primary' : 'border-slate-200 bg-white text-slate-500 hover:border-primary hover:bg-primary-soft hover:text-primary'}`}>{widget.locked ? <Lock size={14} /> : <Unlock size={14} />}</button>
-          <button title="Exportar grafico" onClick={(event) => { event.stopPropagation(); exportWidgetAsPng(cardRef.current, widget, dataset, filters); }} className="rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-xs font-black text-slate-600 hover:border-primary hover:bg-primary-soft hover:text-primary"><Download size={14} /></button>
+          <button title={canExportCharts ? 'Exportar grafico' : 'Exportacao bloqueada pelo plano'} disabled={!canExportCharts} onClick={(event) => { event.stopPropagation(); if (canExportCharts) exportWidgetAsPng(cardRef.current, widget, dataset, filters); }} className="rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-xs font-black text-slate-600 hover:border-primary hover:bg-primary-soft hover:text-primary disabled:cursor-not-allowed disabled:opacity-40"><Download size={14} /></button>
           <button title="Editar gráfico" onClick={(event) => { event.stopPropagation(); onSelect(); onEdit(); }} className="rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-xs font-black text-slate-600 hover:border-primary hover:bg-primary-soft hover:text-primary"><Edit3 size={14} /></button>
           <button onClick={(event) => { event.stopPropagation(); onRemove(); }} className="rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-xs font-black text-slate-400 hover:border-red-200 hover:bg-red-50 hover:text-red-600"><Trash2 size={14} /></button>
         </div>
       </div>
       <div className="h-[calc(100%-58px)] p-4">
-        <ChartRenderer type={widgetVisualType(widget)} metric={widget.metricColumn} secondaryMetric={widget.secondaryMetricColumn} dimension={widget.dimensionColumn} showLegend={widget.showLegend} formatConfig={{ type: widget.valueFormat, prefix: widget.valuePrefix, suffix: widget.valueSuffix, decimals: widget.valueDecimals }} tableColumnFormats={widget.tableColumnFormats} data={data} loading={isFetching} />
+        <ChartRenderer type={widgetVisualType(widget)} metric={widget.metricColumn} secondaryMetric={widget.secondaryMetricColumn} dimension={widget.dimensionColumn} showLegend={widget.showLegend} formatConfig={{ type: widget.valueFormat, prefix: widget.valuePrefix, suffix: widget.valueSuffix, decimals: widget.valueDecimals }} secondaryFormatConfig={{ type: widget.secondaryValueFormat, prefix: widget.secondaryValuePrefix, suffix: widget.secondaryValueSuffix, decimals: widget.secondaryValueDecimals }} tableColumnFormats={widget.tableColumnFormats} data={data} loading={isFetching} />
       </div>
       <div className="resize-helper">{widget.locked ? 'posição travada' : 'arraste a borda para redimensionar'}</div>
     </article>
@@ -572,7 +592,8 @@ function WidgetEditorModal({ widget, dataset, filters, onClose, onSave }: { widg
       tableColumnFormats: draft.type === 'TABLE' ? cleanTableColumnFormats(draft.tableColumnFormats, draft.tableColumns) : {},
       w: Math.min(12, Math.max(2, Number(draft.w) || 2)),
       h: Math.min(18, Math.max(3, Number(draft.h) || 3)),
-      valueDecimals: Math.min(6, Math.max(0, Number(draft.valueDecimals) || 0))
+      valueDecimals: Math.min(6, Math.max(0, Number(draft.valueDecimals) || 0)),
+      secondaryValueDecimals: Math.min(6, Math.max(0, Number(draft.secondaryValueDecimals) || 0))
     });
     onClose();
   }
@@ -604,7 +625,7 @@ function WidgetEditorModal({ widget, dataset, filters, onClose, onSave }: { widg
               {draft.locked && <span className="lock-badge"><Lock size={11} /> travado</span>}
             </div>
             <div className="h-[260px] p-4">
-              <ChartRenderer type={widgetVisualType(draft)} metric={draft.metricColumn} secondaryMetric={draft.secondaryMetricColumn} dimension={draft.dimensionColumn} showLegend={draft.showLegend} formatConfig={{ type: draft.valueFormat, prefix: draft.valuePrefix, suffix: draft.valueSuffix, decimals: draft.valueDecimals }} tableColumnFormats={draft.tableColumnFormats} data={previewData} loading={previewLoading} />
+              <ChartRenderer type={widgetVisualType(draft)} metric={draft.metricColumn} secondaryMetric={draft.secondaryMetricColumn} dimension={draft.dimensionColumn} showLegend={draft.showLegend} formatConfig={{ type: draft.valueFormat, prefix: draft.valuePrefix, suffix: draft.valueSuffix, decimals: draft.valueDecimals }} secondaryFormatConfig={{ type: draft.secondaryValueFormat, prefix: draft.secondaryValuePrefix, suffix: draft.secondaryValueSuffix, decimals: draft.secondaryValueDecimals }} tableColumnFormats={draft.tableColumnFormats} data={previewData} loading={previewLoading} />
             </div>
           </section>
 
@@ -702,18 +723,6 @@ function WidgetEditorModal({ widget, dataset, filters, onClose, onSave }: { widg
                 {aggregationOptions.map((option) => <button type="button" key={option.value} onClick={() => changeAggregation(option.value)} className={`aggregation-card aggregation-card-compact ${draft.aggregation === option.value ? 'aggregation-card-active' : ''}`}><strong>{option.label}</strong><span>{option.hint}</span></button>)}
               </div>}
 
-              <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
-                <div>
-                  <p className="font-black text-slate-950">Máscara do valor</p>
-                  <p className="text-xs font-medium text-slate-500">Defina como o número aparece no KPI, tooltip e legenda. Tabelas podem ter formato por coluna acima.</p>
-                </div>
-                <div className="mt-3 grid gap-3 md:grid-cols-4">
-                  <label className="space-y-1"><span className="form-label">Formato</span><select value={draft.valueFormat} onChange={(event) => patchDraft({ valueFormat: event.target.value as WidgetState['valueFormat'] })} className="form-select"><option value="auto">Automático</option><option value="currency">Moeda BRL</option><option value="number">Número</option><option value="integer">Inteiro</option><option value="percentage">Percentual</option><option value="percentageDecimal">Percentual 0-1</option><option value="duration">Horas / duração</option></select></label>
-                  <label className="space-y-1"><span className="form-label">Prefixo</span><input value={draft.valuePrefix} onChange={(event) => patchDraft({ valuePrefix: event.target.value })} className="form-input" placeholder="Ex.: R$" /></label>
-                  <label className="space-y-1"><span className="form-label">Sufixo</span><input value={draft.valueSuffix} onChange={(event) => patchDraft({ valueSuffix: event.target.value })} className="form-input" placeholder="Ex.: %" /></label>
-                  <label className="space-y-1"><span className="form-label">Decimais</span><input type="number" min={0} max={6} value={draft.valueDecimals} onChange={(event) => patchDraft({ valueDecimals: Number(event.target.value) })} className="form-input" /></label>
-                </div>
-              </div>
             </section>
 
             <section className="builder-modal-section">
@@ -749,6 +758,7 @@ export function DashboardBuilderPage() {
   const navigate = useNavigate();
   const user = useAuthStore(s => s.user);
   const organization = useAuthStore(s => s.organization);
+  const confirm = useConfirm();
   const queryClient = useQueryClient();
   const [name, setName] = useState('Novo Dashboard');
   const [description, setDescription] = useState('');
@@ -767,6 +777,7 @@ export function DashboardBuilderPage() {
   const selectedDataset = datasets.find((dataset: any) => dataset.id === selectedDatasetId) || datasets[0];
   const selectedFilters = filters.filter((filter) => selectedDataset?.id && (!filter.datasetId || filter.datasetId === selectedDataset.id));
   const editingWidget = widgets.find((widget) => widget.id === editingWidgetId);
+  const canExportCharts = planFeature(organization, 'canExportCharts');
 
   const layout: Layout[] = useMemo(() => widgets.map((widget) => ({ i: widget.id, x: widget.x, y: widget.y, w: widget.w, h: widget.h, static: widget.locked, isDraggable: !widget.locked, isResizable: !widget.locked })), [widgets]);
 
@@ -849,7 +860,15 @@ export function DashboardBuilderPage() {
     setWidgets((current) => current.map((widget) => widget.id === widgetId ? { ...widget, ...payload, datasetId: selectedDataset?.id || widget.datasetId } : widget));
   }
 
-  function removeWidget(widgetId: string) {
+  async function removeWidget(widgetId: string) {
+    const widget = widgets.find((item) => item.id === widgetId);
+    const confirmed = await confirm({
+      title: 'Remover quadro do dashboard?',
+      description: `Confirma remover "${widget?.title || 'este quadro'}" do dashboard? A remocao so sera gravada quando voce clicar em Salvar.`,
+      confirmLabel: 'Sim, remover',
+      tone: 'danger'
+    });
+    if (!confirmed) return;
     setWidgets((current) => current.filter((widget) => widget.id !== widgetId));
     if (!isTemporaryId(widgetId)) setRemovedWidgetIds((current) => Array.from(new Set([...current, widgetId])));
     if (selectedWidgetId === widgetId) setSelectedWidgetId('');
@@ -868,6 +887,18 @@ export function DashboardBuilderPage() {
   async function saveDashboard(publish = false) {
     if (!selectedDataset?.id) { setStatus('Escolha um dataset para o dashboard.'); return; }
     if (!widgets.length) { setStatus('Adicione pelo menos um quadro antes de salvar.'); return; }
+    const confirmed = await confirm({
+      title: publish ? 'Salvar e publicar dashboard?' : 'Salvar alteracoes do dashboard?',
+      description: `Confirma salvar o dashboard "${name}" com ${widgets.length} quadro(s)? Depois de salvar, voce sera levado para a visualizacao.`,
+      details: [
+        `Dataset: ${selectedDataset.name}`,
+        `${selectedFilters.length} filtro(s) configurado(s)`,
+        removedWidgetIds.length ? `${removedWidgetIds.length} quadro(s) serao removidos.` : 'Nenhum quadro marcado para remocao.'
+      ],
+      confirmLabel: publish ? 'Sim, salvar e publicar' : 'Sim, salvar',
+      tone: publish ? 'success' : 'warning'
+    });
+    if (!confirmed) return;
     setSaving(true);
     setStatus('Salvando dashboard...');
     try {
@@ -897,7 +928,14 @@ export function DashboardBuilderPage() {
       await queryClient.invalidateQueries({ queryKey: ['dashboard', dashboardId] });
       setRemovedWidgetIds([]);
       setStatus(publish ? 'Dashboard salvo e publicado.' : 'Dashboard salvo com posição, tamanho, filtros e dataset único.');
-      if (!id) navigate(`/dashboards/${dashboardId}/edit`, { replace: true });
+      await confirm({
+        title: 'Dashboard salvo',
+        description: `O dashboard "${name}" foi salvo com sucesso.`,
+        confirmLabel: 'OK',
+        hideCancel: true,
+        tone: 'success'
+      });
+      navigate(`/dashboards/${dashboardId}/view`, { replace: true });
     } catch (error: any) {
       setStatus(error?.response?.data?.message || 'Não foi possível salvar o dashboard.');
     } finally {
@@ -911,19 +949,18 @@ export function DashboardBuilderPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="min-w-[280px] flex-1">
-          <Link to="/dashboards" className="inline-flex items-center gap-2 text-sm font-bold text-slate-500 hover:text-primary"><ArrowLeft size={16} /> Voltar para dashboards</Link>
-          <p className="mt-4 eyebrow">Builder Easy BI</p>
-          <input value={name} onChange={(event) => setName(event.target.value)} className="mt-1 w-full bg-transparent text-3xl font-black tracking-tight text-slate-950 outline-none" />
-          <input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Descrição do dashboard" className="mt-2 w-full bg-transparent text-sm font-medium text-slate-500 outline-none" />
+      <section className="dashboard-gallery-hero selection-hero selection-hero-builder">
+        <div className="dashboard-gallery-hero-content dashboard-builder-hero-content">
+          <Link to="/dashboards" className="selection-hero-back"><ArrowLeft size={16} /> Voltar para dashboards</Link>
+          <p className="eyebrow text-white/80">Builder Easy BI</p>
+          <input value={name} onChange={(event) => setName(event.target.value)} className="dashboard-hero-title-input" />
+          <input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Descricao do dashboard" className="dashboard-hero-description-input" />
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Link to={id ? `/dashboards/${id}/view` : '/dashboards'} className="btn-muted"><Eye size={16} /> Visualizar</Link>
-          <button onClick={() => saveDashboard(false)} disabled={saving} className="btn-dark"><Save size={16} /> {saving ? 'Salvando...' : 'Salvar'}</button>
-          <button onClick={() => saveDashboard(true)} disabled={saving} className="btn-primary"><Send size={16} /> Publicar</button>
+        <div className="selection-hero-actions">
+          <Link to={id ? `/dashboards/${id}/view` : '/dashboards'} className="dashboard-gallery-new-btn selection-hero-dark-btn"><Eye size={16} /> Visualizar</Link>
+          <button onClick={() => saveDashboard(false)} disabled={saving} className="dashboard-gallery-new-btn dashboard-gallery-save-btn"><Save size={16} /> {saving ? 'Salvando...' : 'Salvar'}</button>
         </div>
-      </div>
+      </section>
 
       {status && <div className="rounded-2xl border border-primary bg-primary-soft px-4 py-3 text-sm font-bold text-primary">{status}</div>}
 
@@ -950,19 +987,22 @@ export function DashboardBuilderPage() {
         </div>
       </section>
 
-      <DashboardFilterBar dataset={selectedDataset} filters={filters} onChange={setFilters} compact />
-
       {!datasets.length && <div className="rounded-2xl border border-yellow-200 bg-yellow-50 p-5 text-sm font-bold text-yellow-900">Nenhum dataset encontrado. Importe um CSV/Excel antes de criar gráficos com dados reais.</div>}
 
-      <section className="dashboard-canvas">
+      <div className="dashboard-workbench">
+        <div className="dashboard-workbench-main">
+          <section className="dashboard-canvas">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-4">
           <div className="flex items-center gap-3"><div className="rounded-xl bg-slate-900 p-2.5 text-white"><Grid3X3 size={18} /></div><div><p className="font-black text-slate-950">Área do dashboard</p><p className="text-xs font-medium text-slate-500">Arraste pelo cabeçalho, redimensione pela alça colorida e use o cadeado para travar quadros prontos.</p></div></div>
           <div className="flex flex-wrap items-center gap-2"><span className="inline-flex items-center gap-2 text-xs font-black text-slate-400"><Lock size={14} /> Dataset único · filtros globais · sem sobreposição</span><button type="button" disabled={!selectedWidgetId} onClick={() => selectedWidgetId && openWidgetEditor(selectedWidgetId)} className="btn-muted px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"><Edit3 size={14} /> Editar selecionado</button></div>
         </div>
         <ResponsiveGridLayout className="layout" cols={12} rowHeight={36} margin={[16, 16]} containerPadding={[0, 0]} layout={layout} onLayoutChange={handleLayoutChange} compactType={null} preventCollision isBounded draggableHandle=".drag-handle" draggableCancel=".no-drag" resizeHandles={['se']}>
-          {widgets.map((widget) => <div key={widget.id}><WidgetCard widget={{ ...widget, datasetId: selectedDataset?.id || widget.datasetId }} dataset={selectedDataset} filters={selectedFilters} selected={selectedWidgetId === widget.id} onSelect={() => setSelectedWidgetId(widget.id)} onEdit={() => openWidgetEditor(widget.id)} onToggleLock={() => updateWidget(widget.id, { locked: !widget.locked })} onRemove={() => removeWidget(widget.id)} /></div>)}
+          {widgets.map((widget) => <div key={widget.id}><WidgetCard widget={{ ...widget, datasetId: selectedDataset?.id || widget.datasetId }} dataset={selectedDataset} filters={selectedFilters} canExportCharts={canExportCharts} selected={selectedWidgetId === widget.id} onSelect={() => setSelectedWidgetId(widget.id)} onEdit={() => openWidgetEditor(widget.id)} onToggleLock={() => updateWidget(widget.id, { locked: !widget.locked })} onRemove={() => removeWidget(widget.id)} /></div>)}
         </ResponsiveGridLayout>
-      </section>
+          </section>
+        </div>
+        <DashboardFilterDock dataset={selectedDataset} filters={filters} onChange={setFilters} />
+      </div>
 
       {editingWidget && <WidgetEditorModal widget={editingWidget} dataset={selectedDataset} filters={selectedFilters} onClose={() => setEditingWidgetId('')} onSave={(nextWidget) => { updateWidget(editingWidget.id, nextWidget); setStatus('Alterações do gráfico aplicadas. Clique em Salvar para gravar no banco.'); }} />}
     </div>

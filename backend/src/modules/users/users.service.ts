@@ -3,10 +3,11 @@ import * as bcrypt from 'bcrypt';
 import { ensureAtLeastOneSector, validateSectorIds } from '../../common/utils/sector-access';
 import { PrismaService } from '../../database/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { PlansService } from '../plans/plans.service';
 
 @Injectable()
 export class UsersService {
-  constructor(private prisma: PrismaService, private audit: AuditLogsService) {}
+  constructor(private prisma: PrismaService, private audit: AuditLogsService, private plans: PlansService) {}
 
   async create(dto: any, actor: any, organizationId?: string) {
     const targetOrgId = actor.isSuperAdmin ? dto.organizationId || organizationId : organizationId;
@@ -18,6 +19,10 @@ export class UsersService {
     if (!actor.isSuperAdmin && role.code === 'ORG_ADMIN') throw new ForbiddenException('Admin da organizacao so pode criar Editor ou Leitor.');
 
     await this.assertCanManageOrganizationUsers(actor, targetOrgId);
+    const existingMembership = await this.prisma.userOrganization.findFirst({
+      where: { organizationId: targetOrgId, user: { email: dto.email.toLowerCase(), deletedAt: null } }
+    });
+    if (!existingMembership || existingMembership.status !== 'ACTIVE') await this.plans.assertCanAddUser(targetOrgId);
     const sectorIds = role.code === 'ORG_ADMIN'
       ? await this.getAllActiveSectorIds(targetOrgId)
       : await validateSectorIds(this.prisma, actor, targetOrgId, dto.sectorIds);
@@ -108,6 +113,7 @@ export class UsersService {
     });
     if (!currentMembership && !actor.isSuperAdmin) throw new NotFoundException('Usuario nao encontrado nesta organizacao.');
     if (!currentMembership && !dto.roleId) throw new BadRequestException('Informe um perfil para criar o acesso nesta organizacao.');
+    if ((!currentMembership || currentMembership.status !== 'ACTIVE') && dto.status !== 'INACTIVE') await this.plans.assertCanAddUser(targetOrgId);
 
     let effectiveRole = currentMembership?.role;
     if (dto.roleId) {

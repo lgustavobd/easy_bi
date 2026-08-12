@@ -4,6 +4,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Building2, ChevronLeft, ChevronRight, Database, Edit3, Eye, Layers3, Plus, RefreshCw, Save, Search, Sparkles, Table2, X } from 'lucide-react';
 import { api } from '../../api/resources.api';
 import { useAuthStore } from '../../store/auth.store';
+import { planBlockedMessage, planFeature } from '../../utils/plan';
+import { useConfirm } from '../../components/ConfirmDialog';
 
 const typeLabel: Record<string, string> = {
   TEXT: 'Texto',
@@ -16,10 +18,67 @@ const typeLabel: Record<string, string> = {
 
 const recommendedMetricTypes = new Set(['NUMBER', 'CURRENCY', 'PERCENTAGE']);
 
+function compactTypeLabel(value: any) {
+  const type = String(value || '').toUpperCase();
+  if (['NUMBER', 'CURRENCY', 'PERCENTAGE', 'INTEGER', 'DECIMAL', 'FLOAT', 'DOUBLE', 'DURATION'].includes(type)) return 'Numero';
+  if (type.includes('DATE') || type.includes('TIME')) return 'Data';
+  return 'Texto';
+}
+
+function compactTypeClass(value: any) {
+  const label = compactTypeLabel(value).toLowerCase();
+  if (label === 'numero') return 'is-number';
+  if (label === 'data') return 'is-date';
+  return 'is-text';
+}
+
+function isDateFieldType(value: any) {
+  return compactTypeLabel(value) === 'Data';
+}
+
+function isNumberFieldType(value: any) {
+  return compactTypeLabel(value) === 'Numero';
+}
+
+const dateFormatOptions = [
+  { value: 'dateBr', label: 'DD/MM/AAAA' },
+  { value: 'dateTimeBr', label: 'DD/MM/AAAA HH:mm' },
+  { value: 'monthYear', label: 'MM/AAAA' },
+  { value: 'monthNameYear', label: 'Mês/AAAA' },
+  { value: 'year', label: 'AAAA' }
+];
+
+const editableTypeOptions = [
+  { value: 'NUMBER', label: 'Numero' },
+  { value: 'TEXT', label: 'Texto' },
+  { value: 'DATE', label: 'Data' }
+];
+
+function normalizeEditableDataType(value: any) {
+  const label = compactTypeLabel(value);
+  if (label === 'Data') return 'DATE';
+  if (label === 'Numero') return 'NUMBER';
+  return 'TEXT';
+}
+
 type CalculatedMetricRule = {
   name: string;
   label: string;
   formula: string;
+};
+
+type FieldTypeRow = {
+  name: string;
+  dataType: string;
+  semanticType: string;
+  formatConfig?: Record<string, any>;
+};
+
+type FieldFormatState = {
+  type: string;
+  prefix: string;
+  suffix: string;
+  decimals: string;
 };
 
 function forceModalViewportTop() {
@@ -142,7 +201,7 @@ function asMappingRows(value: any): Array<{ originalName: string; normalizedName
     .filter(Boolean) as Array<{ originalName: string; normalizedName: string }>;
 }
 
-function asTypeRows(value: any): Array<{ name: string; dataType: string; semanticType: string }> {
+function asTypeRows(value: any): FieldTypeRow[] {
   if (Array.isArray(value)) {
     return value
       .map((item) => {
@@ -150,12 +209,13 @@ function asTypeRows(value: any): Array<{ name: string; dataType: string; semanti
           const name = normalizeText((item as any).name || (item as any).normalizedName || (item as any).originalName);
           const dataType = normalizeText((item as any).dataType);
           const semanticType = normalizeText((item as any).semanticType);
+          const formatConfig = typeof (item as any).formatConfig === 'object' && (item as any).formatConfig ? (item as any).formatConfig : {};
           if (!name) return null;
-          return { name, dataType, semanticType };
+          return { name, dataType, semanticType, formatConfig };
         }
         return null;
       })
-      .filter(Boolean) as Array<{ name: string; dataType: string; semanticType: string }>;
+      .filter(Boolean) as FieldTypeRow[];
   }
 
   if (!value || typeof value !== 'object') return [];
@@ -166,14 +226,16 @@ function asTypeRows(value: any): Array<{ name: string; dataType: string; semanti
         return {
           name: normalizeText(name),
           dataType: normalizeText((item as any).dataType),
-          semanticType: normalizeText((item as any).semanticType)
+          semanticType: normalizeText((item as any).semanticType),
+          formatConfig: typeof (item as any).formatConfig === 'object' && (item as any).formatConfig ? (item as any).formatConfig : {}
         };
       }
 
       return {
         name: normalizeText(name),
         dataType: normalizeText(item),
-        semanticType: ''
+        semanticType: '',
+        formatConfig: {}
       };
     })
     .filter((item) => item.name);
@@ -199,7 +261,7 @@ function mergeColumnMapping(currentValue: any, columns: any[]) {
 }
 
 function mergeDetectedTypes(currentValue: any, columns: any[]) {
-  const map = new Map<string, { name: string; dataType: string; semanticType: string }>();
+  const map = new Map<string, FieldTypeRow>();
 
   asTypeRows(currentValue).forEach((item) => {
     map.set(normalizeKey(item.name), item);
@@ -211,7 +273,8 @@ function mergeDetectedTypes(currentValue: any, columns: any[]) {
     map.set(key, {
       name: normalizeText(column?.name),
       dataType: normalizeText(column?.dataType),
-      semanticType: normalizeText(column?.semanticType)
+      semanticType: normalizeText(column?.semanticType),
+      formatConfig: typeof column?.formatConfig === 'object' && column?.formatConfig ? column.formatConfig : {}
     });
   });
 
@@ -512,7 +575,7 @@ function DatasetPreviewModal({ dataset, onClose }: { dataset: any; onClose: () =
   );
 }
 
-function TemplateMetricsModal({
+export function TemplateMetricsModal({
   template,
   organization,
   datasets,
@@ -526,11 +589,35 @@ function TemplateMetricsModal({
   onSaved: (template: any) => void;
 }) {
   const queryClient = useQueryClient();
+  const confirm = useConfirm();
   const datasetOptions = useMemo(() => templateDatasetOptions(template, datasets), [template, datasets]);
   const [selectedDatasetId, setSelectedDatasetId] = useState(template?.datasets?.[0]?.id || datasetOptions[0]?.id || '');
   const [datasetSearch, setDatasetSearch] = useState('');
   const [search, setSearch] = useState('');
   const [selectedMetrics, setSelectedMetrics] = useState(asList(template.metrics));
+  const [selectedDimensions, setSelectedDimensions] = useState(asList(template.dimensions));
+  const [fieldFormats, setFieldFormats] = useState<Record<string, FieldFormatState>>(() => {
+    const entries = asTypeRows(template.detectedTypes).map((item) => {
+      const formatConfig = item.formatConfig || {};
+      return [
+        normalizeKey(item.name),
+        {
+          type: normalizeText(formatConfig.type || 'auto'),
+          prefix: normalizeText(formatConfig.prefix),
+          suffix: normalizeText(formatConfig.suffix),
+          decimals: normalizeText(formatConfig.decimals ?? '2')
+        }
+      ] as const;
+    });
+    return Object.fromEntries(entries);
+  });
+  const [fieldTypes, setFieldTypes] = useState<Record<string, string>>(() => {
+    const entries = asTypeRows(template.detectedTypes).map((item) => [
+      normalizeKey(item.name),
+      normalizeEditableDataType(item.dataType)
+    ] as const);
+    return Object.fromEntries(entries);
+  });
   const [calculatedMetrics, setCalculatedMetrics] = useState(asCalculatedMetrics(template.transformationRules));
   const [newMetricName, setNewMetricName] = useState('');
   const [newMetricFormula, setNewMetricFormula] = useState('');
@@ -598,8 +685,127 @@ function TemplateMetricsModal({
     });
   }, [calculatedByName, datasetColumns, selectedMetrics]);
 
+  const typeByName = useMemo(() => {
+    const map = new Map<string, FieldTypeRow>();
+    asTypeRows(template.detectedTypes).forEach((item) => map.set(normalizeKey(item.name), item));
+    datasetColumns.forEach((column: any) => {
+      const key = normalizeKey(column.name);
+      if (!key || map.has(key)) return;
+      map.set(key, {
+        name: column.name,
+        dataType: column.dataType,
+        semanticType: column.semanticType,
+        formatConfig: column.formatConfig || {}
+      });
+    });
+    return map;
+  }, [datasetColumns, template.detectedTypes]);
+
+  const fieldRows = useMemo(() => {
+    const rows = filteredColumns.map((column: any) => {
+      const metric = selectedMetrics.some((item) => normalizeKey(item) === normalizeKey(column.name));
+      const dimension = selectedDimensions.some((item) => normalizeKey(item) === normalizeKey(column.name));
+      const typeRow = typeByName.get(normalizeKey(column.name));
+      const formatConfig = (column.formatConfig || typeRow?.formatConfig || {}) as any;
+      const calculatedMetric = calculatedByName.get(normalizeKey(column.name)) || (formatConfig.formula ? {
+        name: column.name,
+        label: normalizeText(formatConfig.label || column.originalName || column.name),
+        formula: normalizeText(formatConfig.formula)
+      } : null);
+      return {
+        id: column.id || column.name,
+        name: column.name,
+        label: prettifyField(column),
+        dataType: fieldTypes[normalizeKey(column.name)] || typeRow?.dataType || column.dataType,
+        semanticType: typeRow?.semanticType || column.semanticType,
+        column,
+        calculatedMetric,
+        role: metric ? 'metric' : dimension ? 'dimension' : 'none'
+      };
+    });
+
+    calculatedMetrics.forEach((metric) => {
+      const matchesSearch = !search.trim() || `${metric.name} ${metric.label} ${metric.formula}`.toLowerCase().includes(search.trim().toLowerCase());
+      if (!matchesSearch) return;
+      if (rows.some((row) => normalizeKey(row.name) === normalizeKey(metric.name))) return;
+      rows.unshift({
+        id: metric.name,
+        name: metric.name,
+        label: metric.label || metric.name,
+        dataType: fieldTypes[normalizeKey(metric.name)] || 'NUMBER',
+        semanticType: 'METRIC',
+        column: null,
+        calculatedMetric: metric,
+        role: selectedMetrics.some((item) => normalizeKey(item) === normalizeKey(metric.name)) ? 'metric' : 'none'
+      });
+    });
+
+    return rows;
+  }, [calculatedByName, calculatedMetrics, fieldTypes, filteredColumns, search, selectedDimensions, selectedMetrics, typeByName]);
+
+  function setFieldRole(fieldName: string, role: string) {
+    if (role === 'metric') {
+      setSelectedMetrics((current) => dedupeStrings([...current, fieldName]));
+      setSelectedDimensions((current) => current.filter((item) => normalizeKey(item) !== normalizeKey(fieldName)));
+      setError('');
+      return;
+    }
+
+    if (role === 'dimension') {
+      setSelectedDimensions((current) => dedupeStrings([...current, fieldName]));
+      setSelectedMetrics((current) => current.filter((item) => normalizeKey(item) !== normalizeKey(fieldName)));
+      setCalculatedMetrics((current) => current.filter((item) => normalizeKey(item.name) !== normalizeKey(fieldName)));
+      setError('');
+      return;
+    }
+
+    setSelectedMetrics((current) => current.filter((item) => normalizeKey(item) !== normalizeKey(fieldName)));
+    setSelectedDimensions((current) => current.filter((item) => normalizeKey(item) !== normalizeKey(fieldName)));
+    setCalculatedMetrics((current) => current.filter((item) => normalizeKey(item.name) !== normalizeKey(fieldName)));
+    setError('');
+  }
+
+  function updateFieldFormat(fieldName: string, patch: Partial<FieldFormatState>) {
+    const key = normalizeKey(fieldName);
+    setFieldFormats((current) => ({
+      ...current,
+      [key]: {
+        type: current[key]?.type || 'auto',
+        prefix: current[key]?.prefix || '',
+        suffix: current[key]?.suffix || '',
+        decimals: current[key]?.decimals || '2',
+        ...patch
+      }
+    }));
+  }
+
+  function updateFieldType(fieldName: string, dataType: string) {
+    const key = normalizeKey(fieldName);
+    const nextType = normalizeEditableDataType(dataType);
+    setFieldTypes((current) => ({ ...current, [key]: nextType }));
+    setFieldFormats((current) => {
+      const currentFormat = current[key] || { type: 'auto', prefix: '', suffix: '', decimals: '2' };
+      if (nextType === 'DATE') {
+        return { ...current, [key]: { type: 'dateBr', prefix: '', suffix: '', decimals: '' } };
+      }
+      if (nextType === 'TEXT') {
+        return { ...current, [key]: { type: 'auto', prefix: '', suffix: '', decimals: '' } };
+      }
+      return {
+        ...current,
+        [key]: {
+          type: ['dateBr', 'dateTimeBr', 'monthYear', 'monthNameYear', 'year'].includes(currentFormat.type) ? 'auto' : currentFormat.type || 'auto',
+          prefix: currentFormat.prefix || '',
+          suffix: currentFormat.suffix || '',
+          decimals: currentFormat.decimals || '2'
+        }
+      };
+    });
+  }
+
   function addMetric(columnName: string) {
     setSelectedMetrics((current) => dedupeStrings([...current, columnName]));
+    setSelectedDimensions((current) => current.filter((item) => normalizeKey(item) !== normalizeKey(columnName)));
     setError('');
   }
 
@@ -634,6 +840,7 @@ function TemplateMetricsModal({
     }
 
     setSelectedMetrics((current) => dedupeStrings([...current, metricName]));
+    setSelectedDimensions((current) => current.filter((item) => normalizeKey(item) !== normalizeKey(metricName)));
     setCalculatedMetrics((current) => [
       ...current.filter((item) => normalizeKey(item.name) !== normalizeKey(metricName)),
       { name: metricName, label: metricLabel, formula }
@@ -699,6 +906,29 @@ function TemplateMetricsModal({
     setNewMetricFormula((current) => current ? `${current} ${token}` : token);
   }
 
+  function buildColumnFormatConfig(column: any, format: FieldFormatState) {
+    const baseFormatConfig = { ...((column?.formatConfig || {}) as any) };
+    const cleanBase = Object.fromEntries(Object.entries(baseFormatConfig).filter(([key]) => !['type', 'prefix', 'suffix', 'decimals'].includes(key)));
+    if (isDateFieldType(column?.dataType)) {
+      return {
+        ...cleanBase,
+        type: dateFormatOptions.some((option) => option.value === format.type) ? format.type : 'dateBr'
+      };
+    }
+
+    if (!isNumberFieldType(column?.dataType)) {
+      return cleanBase;
+    }
+
+    return {
+      ...cleanBase,
+      ...(format.type && format.type !== 'auto' ? { type: format.type } : {}),
+      ...(format.prefix ? { prefix: format.prefix } : {}),
+      ...(format.suffix ? { suffix: format.suffix } : {}),
+      ...(format.decimals ? { decimals: Number(format.decimals) } : {})
+    };
+  }
+
   async function saveMetrics() {
     if (editingMetricKey) {
       setError('Finalize ou cancele a edicao da metrica antes de salvar.');
@@ -717,11 +947,40 @@ function TemplateMetricsModal({
       return;
     }
 
+    const confirmed = await confirm({
+      title: 'Salvar colunas do dataset?',
+      description: `Confirma salvar as metricas, dimensoes, formatos e colunas calculadas do modelo "${template.name}"?`,
+      details: [
+        `${selectedMetrics.length} coluna(s) como metrica.`,
+        `${selectedDimensions.length} coluna(s) como dimensao.`,
+        `${calculatedMetrics.length} coluna(s) calculada(s) configurada(s).`
+      ],
+      confirmLabel: 'Sim, salvar colunas',
+      tone: 'warning'
+    });
+    if (!confirmed) return;
+
     setSaving(true);
     setError('');
 
     try {
-      const selectedColumns = datasetColumns.filter((column: any) => selectedMetrics.some((item) => normalizeKey(item) === normalizeKey(column.name)));
+      const configuredDatasetColumns = datasetColumns.map((column: any) => {
+        const key = normalizeKey(column.name);
+        const format = fieldFormats[key] || { type: 'auto', prefix: '', suffix: '', decimals: '2' };
+        const isMetric = selectedMetrics.some((item) => normalizeKey(item) === key);
+        const isDimension = selectedDimensions.some((item) => normalizeKey(item) === key);
+        const dataType = fieldTypes[key] || column.dataType;
+        const typedColumn = { ...column, dataType };
+        const formatConfig = buildColumnFormatConfig(typedColumn, format);
+        return {
+          ...column,
+          dataType,
+          semanticType: isMetric ? 'METRIC' : isDimension ? 'CATEGORY' : column.semanticType,
+          formatConfig
+        };
+      });
+      const selectedColumns = configuredDatasetColumns.filter((column: any) => selectedMetrics.some((item) => normalizeKey(item) === normalizeKey(column.name)));
+      const selectedDimensionColumns = configuredDatasetColumns.filter((column: any) => selectedDimensions.some((item) => normalizeKey(item) === normalizeKey(column.name)));
       const preparedCalculatedMetrics = calculatedMetrics
         .filter((metric) => selectedMetrics.some((item) => normalizeKey(item) === normalizeKey(metric.name)))
         .map((metric) => ({
@@ -730,11 +989,28 @@ function TemplateMetricsModal({
           formula: normalizeText(metric.formula)
         }))
         .filter((metric) => metric.name && metric.formula);
-      const calculatedColumns = preparedCalculatedMetrics.map(calculatedMetricColumn);
+      const calculatedColumns = preparedCalculatedMetrics.map((metric) => {
+        const key = normalizeKey(metric.name);
+        const format = fieldFormats[key] || { type: 'auto', prefix: '', suffix: '', decimals: '2' };
+        const dataType = fieldTypes[key] || 'NUMBER';
+        const calculatedColumn = {
+          ...calculatedMetricColumn(metric),
+          dataType,
+          formatConfig: {
+            formula: metric.formula,
+            label: metric.label
+          }
+        };
+        return {
+          ...calculatedColumn,
+          formatConfig: buildColumnFormatConfig(calculatedColumn, format)
+        };
+      });
       const payload = {
         metrics: selectedMetrics,
-        columnMapping: mergeColumnMapping(template.columnMapping, [...selectedColumns, ...calculatedColumns]),
-        detectedTypes: mergeDetectedTypes(template.detectedTypes, [...selectedColumns, ...calculatedColumns]),
+        dimensions: selectedDimensions,
+        columnMapping: mergeColumnMapping(template.columnMapping, [...selectedColumns, ...selectedDimensionColumns, ...calculatedColumns]),
+        detectedTypes: mergeDetectedTypes(template.detectedTypes, [...configuredDatasetColumns, ...calculatedColumns]),
         transformationRules: {
           ...(template.transformationRules || {}),
           calculatedMetrics: preparedCalculatedMetrics
@@ -747,9 +1023,17 @@ function TemplateMetricsModal({
         ...template,
         ...updatedTemplate,
         metrics: payload.metrics,
+        dimensions: payload.dimensions,
         columnMapping: payload.columnMapping,
         detectedTypes: payload.detectedTypes,
         transformationRules: payload.transformationRules
+      });
+      await confirm({
+        title: 'Colunas salvas',
+        description: `As colunas e metricas do modelo "${template.name}" foram salvas com sucesso.`,
+        confirmLabel: 'OK',
+        hideCancel: true,
+        tone: 'success'
       });
       onClose();
     } catch (err: any) {
@@ -761,7 +1045,7 @@ function TemplateMetricsModal({
 
   return createPortal(
     <div className="builder-modal-backdrop" role="dialog" aria-modal="true" aria-label="Gerenciar metricas do modelo">
-      <div className="builder-modal-panel template-preview-panel">
+      <div className="builder-modal-panel template-preview-panel template-metrics-panel">
         <header className="builder-modal-header">
           <div className="flex items-start justify-between gap-4">
             <div className="flex min-w-0 items-start gap-3">
@@ -777,16 +1061,21 @@ function TemplateMetricsModal({
         </header>
 
         <div className="builder-modal-body space-y-4">
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <div className="flex flex-wrap gap-2">
+          <div className="metrics-modal-topbar">
+            <div className="metrics-context-card">
+              <div className="metrics-context-badges">
                 <div className="org-context-badge"><Building2 size={16} /><span>Organizacao</span><strong>{template.organization?.name || organization?.name || 'Organizacao atual'}</strong></div>
                 <div className="org-context-badge"><Layers3 size={16} /><span>Setor</span><strong>{template.sector?.name || 'Sem setor'}</strong></div>
                 <div className="org-context-badge"><Sparkles size={16} /><span>Metricas</span><strong>{selectedMetrics.length}</strong></div>
               </div>
 
-              <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(220px,0.75fr)_minmax(240px,0.95fr)_minmax(220px,1fr)]">
-                <label>
+              <div className="metrics-context-details">
+                <div className="metrics-dataset-chip">
+                  <Database size={16} />
+                  <span>Dataset</span>
+                  <strong>{selectedDataset?.name || template.name}</strong>
+                </div>
+                <label className="hidden">
                   <span className="form-label">Filtrar datasets</span>
                   <div className="app-search-field app-search-field-compact mt-1">
                     <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
@@ -795,7 +1084,7 @@ function TemplateMetricsModal({
                   <p className="mt-1 text-[11px] font-bold text-slate-400">{filteredDatasetOptions.length} de {datasetOptions.length} datasets</p>
                 </label>
 
-                <label>
+                <label className="hidden">
                   <span className="form-label">Dataset base</span>
                   <select className="form-select mt-1" value={selectedDatasetId} onChange={(event) => setSelectedDatasetId(event.target.value)}>
                     {!datasetOptionsForSelect.length && <option value="">Nenhum dataset encontrado</option>}
@@ -810,7 +1099,7 @@ function TemplateMetricsModal({
                   )}
                 </label>
 
-                <label>
+                <label className="metrics-field-search hidden">
                   <span className="form-label">Buscar campo no dataset</span>
                   <div className="app-search-field app-search-field-compact mt-1">
                     <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
@@ -820,12 +1109,12 @@ function TemplateMetricsModal({
               </div>
             </div>
 
-            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-900">
-              <div className="flex items-start gap-3">
-                <AlertTriangle className="mt-0.5 shrink-0" size={18} />
+            <div className="metrics-alert-card">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="mt-0.5 shrink-0" size={16} />
                 <div>
                   <p className="font-black">Coluna calculada real</p>
-                  <p className="mt-1 leading-6">
+                  <p className="mt-1">
                     A formula e aplicada nas linhas do dataset ligado ao modelo. Depois disso a coluna aparece como metrica para usar no dashboard.
                   </p>
                 </div>
@@ -833,12 +1122,191 @@ function TemplateMetricsModal({
             </div>
           </div>
 
+          <div className="metrics-search-row">
+            <label>
+              <span className="form-label metrics-strong-label">Buscar campo no dataset</span>
+              <div className="app-search-field app-search-field-compact mt-1">
+                <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                <input className="form-input pl-10" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Ex.: valor, margem, ticket..." />
+              </div>
+            </label>
+          </div>
+
           {error && <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">{error}</div>}
 
-          <section className="builder-modal-section">
-            <div className="grid gap-3 lg:grid-cols-[minmax(220px,0.7fr)_minmax(280px,1fr)_auto] lg:items-end">
+          <section className="builder-modal-section metrics-config-section">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="font-black text-slate-950">Tabela de campos do modelo</p>
+                <p className="mt-1 text-sm font-semibold text-slate-500">Escolha se o campo vira metrica, dimensao ou fica fora do modelo. Configure prefixo, sufixo e veja formulas em uma linha unica.</p>
+              </div>
+              <div className="metrics-config-actions">
+                {datasetDetails && (
+                  <div className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-xs font-black text-slate-500">
+                    {Number(datasetDetails.rowCount || 0).toLocaleString('pt-BR')} linhas - {(datasetDetails.columns || []).length} colunas
+                  </div>
+                )}
+                <button
+                  type="button"
+                  className="metrics-create-shortcut"
+                  onClick={() => {
+                    const section = document.getElementById(`create-calculated-column-${template.id}`);
+                    section?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    window.setTimeout(() => {
+                      section?.querySelector<HTMLInputElement>('input')?.focus();
+                    }, 260);
+                  }}
+                >
+                  <Plus size={14} />
+                  Criar coluna calculada
+                </button>
+              </div>
+            </div>
+
+            <div className="metrics-config-table-wrap mt-4">
+              <table className="metrics-config-table">
+                <thead>
+                  <tr>
+                    <th>Acoes</th>
+                    <th>Campo</th>
+                    <th>Tipo</th>
+                    <th>Uso</th>
+                    <th>Formato</th>
+                    <th>Formula</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {fieldRows.map((row) => {
+                    const key = normalizeKey(row.name);
+                    const isEditing = editingMetricKey === key;
+                    const format = fieldFormats[key] || { type: 'auto', prefix: '', suffix: '', decimals: '2' };
+                    const canEditMetric = Boolean(row.calculatedMetric || (!row.column && row.role === 'metric'));
+                    const isDateField = isDateFieldType(row.dataType);
+                    const isNumberField = isNumberFieldType(row.dataType);
+                    const dateFormatValue = dateFormatOptions.some((option) => option.value === format.type) ? format.type : 'dateBr';
+
+                    return (
+                      <tr key={row.id} className={row.role === 'metric' ? 'is-metric' : row.role === 'dimension' ? 'is-dimension' : ''}>
+                        <td className="metrics-actions-cell">
+                          {isEditing ? (
+                            <>
+                              <button type="button" onClick={() => confirmEditingMetric(row.name)} className="is-save" aria-label="Salvar edicao" title="Salvar"><Save size={14} /></button>
+                              <button type="button" onClick={cancelEditingMetric} aria-label="Cancelar edicao" title="Cancelar"><X size={14} /></button>
+                            </>
+                          ) : (
+                            <>
+                              {row.role !== 'none' && <button type="button" onClick={() => setFieldRole(row.name, 'none')} aria-label={`Remover ${row.label}`} title="Remover do modelo"><X size={14} /></button>}
+                              {canEditMetric && <button type="button" onClick={() => startEditingMetric(row.name)} className="is-edit" aria-label={`Editar ${row.label}`} title="Editar formula"><Edit3 size={14} /></button>}
+                              {row.role === 'none' && <button type="button" onClick={() => addMetric(row.name)} className="is-add" aria-label={`Adicionar ${row.label} como metrica`} title="Adicionar como metrica"><Plus size={14} /></button>}
+                            </>
+                          )}
+                        </td>
+                        <td className="metrics-config-name-cell">
+                          {isEditing ? (
+                            <input className="form-input py-2 text-sm" value={editingMetricName} onChange={(event) => setEditingMetricName(event.target.value)} placeholder="Nome da coluna calculada" autoFocus />
+                          ) : (
+                            <>
+                              <strong>{row.label}</strong>
+                              <span>{row.name}</span>
+                            </>
+                          )}
+                        </td>
+                        <td>
+                          <select className={`metrics-type-select ${compactTypeClass(row.dataType)}`} value={normalizeEditableDataType(row.dataType)} onChange={(event) => updateFieldType(row.name, event.target.value)}>
+                            {editableTypeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                          </select>
+                        </td>
+                        <td>
+                          <select className="metrics-role-select" value={row.role === 'none' ? '' : row.role} onChange={(event) => event.target.value && setFieldRole(row.name, event.target.value)}>
+                            <option value="" disabled>Escolha</option>
+                            <option value="metric">Metrica</option>
+                            {!row.calculatedMetric && <option value="dimension">Dimensao</option>}
+                          </select>
+                        </td>
+                        <td className="metrics-format-cell">
+                          {isDateField ? (
+                            <div className="metrics-format-control is-date-format">
+                              <label>
+                                <span>Formato da data</span>
+                                <select value={dateFormatValue} onChange={(event) => updateFieldFormat(row.name, { type: event.target.value, prefix: '', suffix: '', decimals: '' })}>
+                                  {dateFormatOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                                </select>
+                              </label>
+                            </div>
+                          ) : isNumberField ? (
+                            <div className="metrics-format-control">
+                              <label>
+                                <span>Formato</span>
+                                <select value={format.type} onChange={(event) => updateFieldFormat(row.name, { type: event.target.value })}>
+                                  <option value="auto">Auto</option>
+                                  <option value="number">Numero</option>
+                                  <option value="currency">Moeda</option>
+                                  <option value="percentage">Percentual</option>
+                                  <option value="percentageDecimal">0,9 vira 90%</option>
+                                  <option value="integer">Inteiro</option>
+                                  <option value="duration">Horas</option>
+                                </select>
+                              </label>
+                              <label>
+                                <span>Prefixo</span>
+                                <input value={format.prefix} onChange={(event) => updateFieldFormat(row.name, { prefix: event.target.value })} placeholder="R$" />
+                              </label>
+                              <label>
+                                <span>Sufixo</span>
+                                <input value={format.suffix} onChange={(event) => updateFieldFormat(row.name, { suffix: event.target.value })} placeholder="%" />
+                              </label>
+                              <label>
+                                <span>Arredondamento</span>
+                                <input value={format.decimals} onChange={(event) => updateFieldFormat(row.name, { decimals: event.target.value.replace(/\D/g, '').slice(0, 2) })} placeholder="2" />
+                              </label>
+                            </div>
+                          ) : (
+                            <span className="metrics-format-blank" aria-hidden="true" />
+                          )}
+                        </td>
+                        <td className="metrics-formula-cell">
+                          {isEditing ? (
+                            <input
+                              className="form-input py-2 text-sm"
+                              value={editingMetricFormula}
+                              onChange={(event) => setEditingMetricFormula(event.target.value)}
+                              onKeyDown={(event) => {
+                                if (event.key === 'Enter') {
+                                  event.preventDefault();
+                                  confirmEditingMetric(row.name);
+                                }
+                                if (event.key === 'Escape') cancelEditingMetric();
+                              }}
+                              placeholder="Formula. Ex.: {receita} - {custo}"
+                            />
+                          ) : row.calculatedMetric ? (
+                            <code>{row.calculatedMetric.formula}</code>
+                          ) : (
+                            <button type="button" onClick={() => insertColumnInFormula(row.name)} className="metrics-inline-action"><Plus size={13} /> Usar na formula</button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+
+                  {!fieldRows.length && (
+                    <tr><td colSpan={6} className="metrics-empty-cell">{isFetching ? 'Carregando colunas do dataset...' : 'Nenhum campo encontrado para esse filtro.'}</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section id={`create-calculated-column-${template.id}`} className="builder-modal-section metrics-create-column-section">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="font-black text-slate-950">Criar coluna calculada</p>
+                <p className="mt-1 text-sm font-semibold text-slate-500">Use os campos da tabela acima na formula para gerar uma nova coluna numerica no modelo.</p>
+              </div>
+            </div>
+            <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(220px,0.55fr)_minmax(360px,1fr)_auto] lg:items-end">
               <label>
-                <span className="form-label">Nome da coluna calculada</span>
+                <span className="form-label metrics-strong-label">Nome da coluna calculada</span>
                 <input
                   className="form-input mt-1"
                   value={newMetricName}
@@ -847,7 +1315,7 @@ function TemplateMetricsModal({
                 />
               </label>
               <label>
-                <span className="form-label">Formula</span>
+                <span className="form-label metrics-strong-label">Formula</span>
                 <input
                   className="form-input mt-1"
                   value={newMetricFormula}
@@ -866,10 +1334,10 @@ function TemplateMetricsModal({
                 Criar coluna
               </button>
             </div>
-            <p className="mt-2 text-xs font-semibold text-slate-500">Use os campos entre chaves, como {`{receita}`} e {`{custo}`}. O sistema calcula o valor linha a linha e salva como uma nova coluna numerica.</p>
+            <p className="mt-2 text-xs font-semibold text-slate-500">Dica: clique em "Usar na formula" na tabela acima para inserir o campo entre chaves automaticamente.</p>
           </section>
 
-          <section className="builder-modal-section">
+          <section className="builder-modal-section hidden">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <p className="font-black text-slate-950">Metricas atualmente salvas</p>
@@ -934,7 +1402,7 @@ function TemplateMetricsModal({
             </div>
           </section>
 
-          <section className="builder-modal-section">
+          <section className="builder-modal-section hidden">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <p className="font-black text-slate-950">Campos disponiveis no dataset</p>
@@ -1011,7 +1479,9 @@ function TemplateMetricsModal({
 export function TemplatesPage() {
   const user = useAuthStore(s => s.user);
   const organization = useAuthStore(s => s.organization);
+  const confirm = useConfirm();
   const allowed = canManageTemplates(user, organization);
+  const canUseCalculatedMetrics = planFeature(organization, 'canUseCalculatedMetrics');
   const { data: templates = [] } = useQuery({ queryKey: ['import-templates'], queryFn: api.templates.list, enabled: allowed });
   const { data: datasets = [] } = useQuery({ queryKey: ['datasets'], queryFn: api.datasets.list, enabled: allowed });
   const [selectedTemplate, setSelectedTemplate] = useState<any>(null);
@@ -1045,7 +1515,17 @@ export function TemplatesPage() {
     openAfterViewportTop(() => setSelectedTemplate(template));
   }
 
-  function openMetricsManager(template: any) {
+  async function openMetricsManager(template: any) {
+    if (!canUseCalculatedMetrics) {
+      await confirm({
+        title: 'Recurso bloqueado pelo plano',
+        description: planBlockedMessage(organization, 'criar ou editar metricas calculadas'),
+        confirmLabel: 'OK',
+        hideCancel: true,
+        tone: 'warning'
+      });
+      return;
+    }
     setEditingTemplate(null);
     openAfterViewportTop(() => setEditingTemplate(template));
   }
@@ -1071,17 +1551,17 @@ export function TemplatesPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="eyebrow">Reutilizacao</p>
-          <h2 className="page-title">Modelos de importacao</h2>
-          <p className="mt-2 max-w-3xl text-sm text-zinc-500">Agora voce pode abrir a lupa e tambem complementar as metricas do modelo com campos de um dataset selecionado, sem interferir nos dashboards ja publicados.</p>
+      <section className="dashboard-gallery-hero selection-hero selection-hero-templates">
+        <div className="dashboard-gallery-hero-content">
+          <p className="eyebrow text-white/80">Easy BI Workspace</p>
+          <h3>Reutilize modelos com seguranca</h3>
+          <p>Abra a lupa, confira datasets vinculados e evolua colunas do modelo sem interferir nos dashboards ja publicados.</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <div className="org-context-badge"><Building2 size={16} /><span>Organizacao</span><strong>{organization?.name || 'Global SaaS'}</strong></div>
-          <span className="rounded-full bg-primary-soft px-4 py-2 text-xs font-black text-primary">{totalTemplates} modelos</span>
+          <span className="selection-hero-pill"><Building2 size={15} /> {organization?.name || 'Global SaaS'}</span>
+          <span className="selection-hero-pill"><Layers3 size={15} /> {totalTemplates} modelos</span>
         </div>
-      </div>
+      </section>
 
       <div className="templates-workbench">
         <div className="templates-toolbar">
@@ -1158,7 +1638,7 @@ export function TemplatesPage() {
                   {linkedDatasets[0] && (
                     <button type="button" onClick={() => openDatasetPreview(linkedDatasets[0])} className="btn-muted px-3 py-2 text-xs"><Table2 size={14} /> Ver dados</button>
                   )}
-                  <button type="button" onClick={() => openMetricsManager(template)} className="btn-primary px-3 py-2 text-xs"><Sparkles size={14} /> Metricas</button>
+                  <button type="button" disabled={!canUseCalculatedMetrics} onClick={() => openMetricsManager(template)} className="btn-primary px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40"><Sparkles size={14} /> Metricas</button>
                 </div>
               </div>
             </article>

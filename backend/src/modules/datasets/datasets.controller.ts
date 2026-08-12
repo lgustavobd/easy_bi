@@ -13,6 +13,7 @@ import { TenantGuard } from '../../common/guards/tenant.guard';
 import { DatasetsService } from './datasets.service';
 
 const uploadDir = join(process.cwd(), 'uploads', 'tmp');
+const datasetUploadMaxBytes = Number(process.env.DATASET_UPLOAD_MAX_BYTES || 25 * 1024 * 1024);
 const uploadInterceptor = FileInterceptor('file', {
   storage: diskStorage({
     destination: (_, __, cb) => {
@@ -24,6 +25,7 @@ const uploadInterceptor = FileInterceptor('file', {
       cb(null, `${Date.now()}-${Math.random().toString(36).slice(2)}-${safeName}`);
     }
   }),
+  limits: { fileSize: datasetUploadMaxBytes },
   fileFilter: (_, file, cb) => {
     if (/\.(csv|xlsx|xls)$/i.test(file.originalname)) return cb(null, true);
     return cb(new BadRequestException('Formato inválido. Envie CSV, XLS ou XLSX.'), false);
@@ -53,7 +55,7 @@ export class DatasetsController {
   }
 
   @Post('workbook-sheets')
-  @Permissions('dashboard.view')
+  @Permissions('dataset.upload')
   @UseInterceptors(uploadInterceptor)
   workbookSheets(@UploadedFile() file: Express.Multer.File) {
     return this.service.workbookSheets(file);
@@ -69,6 +71,12 @@ export class DatasetsController {
   @Permissions('dashboard.view')
   get(@Param('id') id: string, @CurrentOrganization() org: string, @CurrentUser() user: any) {
     return this.service.get(id, org, user);
+  }
+
+  @Post(':id/import-template')
+  @Permissions('dataset.upload')
+  ensureImportTemplate(@Param('id') id: string, @CurrentOrganization() org: string, @CurrentUser() user: any) {
+    return this.service.ensureImportTemplate(id, org, user);
   }
 
 

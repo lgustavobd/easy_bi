@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { CalendarDays, Edit3, Eye, LayoutDashboard, Loader2, Plus, Search, Trash2 } from 'lucide-react';
+import { BarChart3, CalendarDays, Edit3, Eye, LayoutDashboard, Loader2, Plus, Search, Trash2 } from 'lucide-react';
 import { api } from '../../api/resources.api';
 import { useAuthStore } from '../../store/auth.store';
+import { useConfirm } from '../../components/ConfirmDialog';
 
 function formatDate(value?: string) {
   if (!value) return 'Sem atualizacao';
@@ -18,6 +19,7 @@ function canEditDashboard(user: any, organization: any) {
 export function DashboardListPage() {
   const user = useAuthStore(s => s.user);
   const organization = useAuthStore(s => s.organization);
+  const confirm = useConfirm();
   const canEdit = canEditDashboard(user, organization);
   const { data: dashboards = [], isLoading, refetch } = useQuery({ queryKey: ['dashboards'], queryFn: api.dashboards.list });
   const [message, setMessage] = useState('');
@@ -34,12 +36,25 @@ export function DashboardListPage() {
   }, [dashboards, dashboardFilter]);
 
   async function removeDashboard(id: string, name: string) {
-    if (!window.confirm(`Excluir o dashboard "${name}"?`)) return;
+    const confirmed = await confirm({
+      title: 'Excluir dashboard?',
+      description: `Voce esta prestes a excluir o dashboard "${name}". Essa acao remove o painel da organizacao.`,
+      confirmLabel: 'Sim, excluir',
+      tone: 'danger'
+    });
+    if (!confirmed) return;
     setMessage('');
     try {
       await api.dashboards.remove(id);
       setMessage('Dashboard excluido com sucesso.');
       await refetch();
+      await confirm({
+        title: 'Dashboard excluido',
+        description: `O dashboard "${name}" foi excluido com sucesso.`,
+        confirmLabel: 'OK',
+        hideCancel: true,
+        tone: 'success'
+      });
     } catch (error: any) {
       setMessage(error?.response?.data?.message || 'Nao foi possivel excluir o dashboard.');
     }
@@ -47,16 +62,16 @@ export function DashboardListPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <p className="eyebrow">Dashboards</p>
-          <h2 className="page-title">Paineis da organizacao</h2>
-          <p className="mt-2 max-w-3xl text-sm font-medium text-slate-500">Visualize dashboards publicados ou entre no editor para ajustar quadros, filtros, metrica, atributo, legenda, posicao e tamanho.</p>
-        </div>
-        {canEdit && <Link to="/dashboards/new" className="btn-primary"><Plus size={18} /> Novo dashboard</Link>}
-      </div>
-
       {message && <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-600 shadow-sm">{message}</div>}
+
+      <section className="dashboard-gallery-hero">
+        <div className="dashboard-gallery-hero-content">
+          <p className="eyebrow text-white/80">Easy BI Workspace</p>
+          <h3>Explore seus paineis recentes</h3>
+          <p>Encontre dashboards publicados, acompanhe quadros ativos e abra rapidamente a visualizacao ou o editor.</p>
+        </div>
+        {canEdit && <Link to="/dashboards/new" className="dashboard-gallery-new-btn"><Plus size={17} /> Novo dashboard</Link>}
+      </section>
 
       <section className="app-search-shell">
         <div className="app-search-icon"><Search size={22} /></div>
@@ -70,15 +85,25 @@ export function DashboardListPage() {
       {isLoading ? (
         <div className="card-premium flex items-center gap-3 p-6 text-sm font-bold text-slate-500"><Loader2 className="animate-spin" size={18} /> Carregando dashboards...</div>
       ) : filteredDashboards.length ? (
-        <div className="dashboard-list-shell">
+        <div className="dashboard-gallery-section">
+          <div className="dashboard-gallery-heading">
+            <h3>Favoritos e frequentes</h3>
+            <span>{filteredDashboards.length} painel(is)</span>
+          </div>
+          <div className="dashboard-list-shell">
           {filteredDashboards.map((dashboard: any) => (
             <article key={dashboard.id} className="dashboard-list-row">
+              <div className="dashboard-card-preview">
+                <div className="dashboard-card-orb">
+                  <BarChart3 size={42} />
+                </div>
+                <span className="dashboard-card-mini-icon"><LayoutDashboard size={15} /></span>
+              </div>
               <div className="dashboard-list-main">
                 <div className="dashboard-list-icon"><LayoutDashboard size={20} /></div>
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <h3 className="dashboard-list-title">{dashboard.name}</h3>
-                    <span className={`dashboard-status-pill ${dashboard.isPublished ? 'dashboard-status-published' : 'dashboard-status-draft'}`}>{dashboard.isPublished ? 'Publicado' : 'Rascunho'}</span>
                   </div>
                   <p className="dashboard-list-description">{dashboard.description || 'Sem descricao cadastrada.'}</p>
                   <p className="dashboard-list-sector">{dashboard.sector?.name || 'Sem setor definido'}</p>
@@ -97,6 +122,7 @@ export function DashboardListPage() {
               </div>
             </article>
           ))}
+          </div>
         </div>
       ) : (
         <div className="card-premium p-8 text-center">

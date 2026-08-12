@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Building2, Edit3, Layers3, PlusCircle, RotateCcw, Save, Trash2, X } from 'lucide-react';
+import { Building2, CreditCard, Edit3, Layers3, PlusCircle, RotateCcw, Save, Trash2, X } from 'lucide-react';
 import { api } from '../../api/resources.api';
 import { useAuthStore } from '../../store/auth.store';
+import { useConfirm } from '../../components/ConfirmDialog';
 
 function canManageSectors(user: any, organization: any) {
   const role = String(organization?.role || '').toUpperCase();
@@ -13,34 +14,56 @@ function sectorStatusClass(status: string) {
   return status === 'ACTIVE' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500';
 }
 
+function formatLimit(value: any) {
+  return value === null || value === undefined ? 'Ilimitado' : Number(value || 0).toLocaleString('pt-BR');
+}
+
+function formatPlanPrice(plan: any) {
+  if (plan?.monthlyPrice === null || plan?.monthlyPrice === undefined) return plan?.priceLabel || 'Sob consulta';
+  return `${Number(plan.monthlyPrice).toLocaleString('pt-BR', { style: 'currency', currency: plan.currency || 'BRL' })}/mes`;
+}
+
+function hasPlanFeature(organization: any, feature: string) {
+  return organization?.plan?.features?.[feature] !== false;
+}
+
 export function OrganizationsPage() {
   const user = useAuthStore(s => s.user);
   const currentOrg = useAuthStore(s => s.organization);
+  const updateCurrentOrganization = useAuthStore(s => s.updateCurrentOrganization);
+  const confirm = useConfirm();
   const { data: organizations = [], refetch } = useQuery({ queryKey: ['organizations'], queryFn: api.organizations.list });
+  const { data: plans = [] } = useQuery({ queryKey: ['plans'], queryFn: api.plans.list, enabled: Boolean(user?.isSuperAdmin) });
   const [selectedOrganizationId, setSelectedOrganizationId] = useState(currentOrg?.id || '');
   const manageableOrgId = user?.isSuperAdmin ? selectedOrganizationId : currentOrg?.id;
   const selectedOrganization = useMemo(
     () => organizations.find((org: any) => org.id === manageableOrgId) || currentOrg,
     [organizations, manageableOrgId, currentOrg]
   );
+  const defaultPlanId = useMemo(() => plans.find((plan: any) => plan.isDefault)?.id || plans[0]?.id || '', [plans]);
   const { data: sectors = [], refetch: refetchSectors } = useQuery({
     queryKey: ['sectors', manageableOrgId],
     queryFn: () => api.sectors.list(user?.isSuperAdmin ? { organizationId: manageableOrgId } : {}),
     enabled: Boolean(manageableOrgId && canManageSectors(user, selectedOrganization))
   });
 
-  const [form, setForm] = useState({ name: '', document: '', initialSectors: 'Comercial, Financeiro, Operacoes' });
+  const [form, setForm] = useState({ name: '', document: '', planId: '', initialSectors: 'Comercial, Financeiro, Operacoes' });
   const [sectorForm, setSectorForm] = useState({ name: '', code: '', description: '' });
   const [editingSector, setEditingSector] = useState<any>(null);
   const [sectorEditForm, setSectorEditForm] = useState({ name: '', code: '', description: '', status: 'ACTIVE' });
   const [editingOrg, setEditingOrg] = useState<any>(null);
-  const [orgEditForm, setOrgEditForm] = useState({ name: '', document: '', status: 'ACTIVE', accent: 'PURPLE', primary: '#7C3AED', themeConfig: {} as any });
+  const [orgEditForm, setOrgEditForm] = useState({ name: '', document: '', planId: '', status: 'ACTIVE', accent: 'PURPLE', primary: '#7C3AED', themeConfig: {} as any });
   const [message, setMessage] = useState('');
 
   useEffect(() => {
     if (!user?.isSuperAdmin || selectedOrganizationId || !organizations.length) return;
     setSelectedOrganizationId(organizations[0].id);
   }, [organizations, selectedOrganizationId, user?.isSuperAdmin]);
+
+  useEffect(() => {
+    if (!user?.isSuperAdmin || form.planId || !defaultPlanId) return;
+    setForm((current) => ({ ...current, planId: defaultPlanId }));
+  }, [defaultPlanId, form.planId, user?.isSuperAdmin]);
 
   useEffect(() => {
     setSectorForm({ name: '', code: '', description: '' });
@@ -54,16 +77,39 @@ export function OrganizationsPage() {
 
   async function createOrganization() {
     if (!form.name) return;
+    const planId = form.planId || defaultPlanId;
+    const selectedPlan = plans.find((plan: any) => plan.id === planId);
+    const initialSectors = form.initialSectors.split(',').map(item => item.trim()).filter(Boolean);
+    const canCreateInitialSectors = selectedPlan?.features?.canCreateSectors !== false;
+    const confirmed = await confirm({
+      title: 'Criar organizacao?',
+      description: `Confirma a criacao da organizacao "${form.name}"?`,
+      details: [
+        `Plano: ${selectedPlan?.name || 'padrao'}`,
+        canCreateInitialSectors && initialSectors.length ? `Setores iniciais: ${initialSectors.join(', ')}` : 'A organizacao sera criada sem setores extras iniciais.'
+      ],
+      confirmLabel: 'Sim, criar organizacao',
+      tone: 'success'
+    });
+    if (!confirmed) return;
     try {
-      const org = await api.organizations.create({ name: form.name, document: form.document, themeConfig: { accent: 'PURPLE', primary: '#7C3AED' } });
-      const initialSectors = form.initialSectors.split(',').map(item => item.trim()).filter(Boolean);
-      for (const sectorName of initialSectors.length ? initialSectors : ['Geral']) {
-        await api.sectors.create({ name: sectorName, organizationId: org.id });
+      const org = await api.organizations.create({ name: form.name, document: form.document, planId, themeConfig: { accent: 'PURPLE', primary: '#7C3AED' } });
+      if (canCreateInitialSectors) {
+        for (const sectorName of initialSectors) {
+          await api.sectors.create({ name: sectorName, organizationId: org.id });
+        }
       }
-      setForm({ name: '', document: '', initialSectors: 'Comercial, Financeiro, Operacoes' });
+      setForm({ name: '', document: '', planId: defaultPlanId, initialSectors: 'Comercial, Financeiro, Operacoes' });
       setSelectedOrganizationId(org.id);
-      setMessage('Organizacao criada com setores iniciais. Agora crie o Admin da Organizacao em Usuarios.');
+      setMessage(canCreateInitialSectors ? 'Organizacao criada com setores iniciais. Agora crie o Admin da Organizacao em Usuarios.' : 'Organizacao criada. O plano escolhido usa apenas o setor padrao Geral.');
       await refreshAll();
+      await confirm({
+        title: 'Organizacao criada',
+        description: `A organizacao "${org.name || form.name}" foi criada com sucesso.`,
+        confirmLabel: 'OK',
+        hideCancel: true,
+        tone: 'success'
+      });
     } catch (err: any) {
       setMessage(err?.response?.data?.message || 'Apenas Super Admin pode criar organizacoes.');
     }
@@ -71,11 +117,29 @@ export function OrganizationsPage() {
 
   async function createSector() {
     if (!sectorForm.name || !manageableOrgId) return;
+    if (!hasPlanFeature(selectedOrganization, 'canCreateSectors')) {
+      setMessage('O plano atual da organizacao nao permite criar setores extras.');
+      return;
+    }
+    const confirmed = await confirm({
+      title: 'Criar setor?',
+      description: `Confirma a criacao do setor "${sectorForm.name}" na organizacao "${selectedOrganization?.name || 'selecionada'}"?`,
+      confirmLabel: 'Sim, criar setor',
+      tone: 'success'
+    });
+    if (!confirmed) return;
     try {
       await api.sectors.create({ ...sectorForm, organizationId: manageableOrgId });
       setSectorForm({ name: '', code: '', description: '' });
       setMessage('Setor criado com sucesso. Agora voce pode vincular usuarios a ele.');
       await refetchSectors();
+      await confirm({
+        title: 'Setor criado',
+        description: `O setor "${sectorForm.name}" foi criado com sucesso.`,
+        confirmLabel: 'OK',
+        hideCancel: true,
+        tone: 'success'
+      });
     } catch (err: any) {
       setMessage(err?.response?.data?.message || 'Nao foi possivel criar o setor.');
     }
@@ -88,22 +152,50 @@ export function OrganizationsPage() {
 
   async function saveSector() {
     if (!editingSector) return;
+    const confirmed = await confirm({
+      title: 'Salvar alteracoes do setor?',
+      description: `O setor "${editingSector.name}" sera atualizado para "${sectorEditForm.name}".`,
+      details: [`Status: ${sectorEditForm.status}`],
+      confirmLabel: 'Sim, salvar',
+      tone: 'warning'
+    });
+    if (!confirmed) return;
     try {
       await api.sectors.update(editingSector.id, sectorEditForm);
       setEditingSector(null);
       setMessage('Setor atualizado.');
       await refetchSectors();
+      await confirm({
+        title: 'Setor atualizado',
+        description: `As alteracoes do setor "${sectorEditForm.name}" foram salvas com sucesso.`,
+        confirmLabel: 'OK',
+        hideCancel: true,
+        tone: 'success'
+      });
     } catch (err: any) {
       setMessage(err?.response?.data?.message || 'Nao foi possivel atualizar o setor.');
     }
   }
 
   async function removeSector(id: string, name: string) {
-    if (!window.confirm(`Inativar o setor "${name}"?`)) return;
+    const confirmed = await confirm({
+      title: 'Inativar setor?',
+      description: `Tem certeza que deseja inativar o setor "${name}"? Usuarios podem perder acesso aos dados desse setor.`,
+      confirmLabel: 'Sim, inativar',
+      tone: 'danger'
+    });
+    if (!confirmed) return;
     try {
       await api.sectors.remove(id);
       setMessage('Setor inativado.');
       await refetchSectors();
+      await confirm({
+        title: 'Setor inativado',
+        description: `O setor "${name}" foi inativado com sucesso.`,
+        confirmLabel: 'OK',
+        hideCancel: true,
+        tone: 'success'
+      });
     } catch (err: any) {
       setMessage(err?.response?.data?.message || 'Nao foi possivel remover o setor.');
     }
@@ -115,6 +207,7 @@ export function OrganizationsPage() {
     setOrgEditForm({
       name: org.name || '',
       document: org.document || '',
+      planId: org.planId || org.plan?.id || defaultPlanId,
       status: org.deletedAt ? 'INACTIVE' : org.status || 'ACTIVE',
       accent: themeConfig.accent || 'PURPLE',
       primary: themeConfig.primary || '#7C3AED',
@@ -124,38 +217,86 @@ export function OrganizationsPage() {
 
   async function saveOrganization() {
     if (!editingOrg) return;
+    const confirmed = await confirm({
+      title: 'Salvar organizacao?',
+      description: `As configuracoes da organizacao "${editingOrg.name}" serao atualizadas.`,
+      details: [
+        `Novo nome: ${orgEditForm.name}`,
+        `Status: ${orgEditForm.status}`,
+        user?.isSuperAdmin ? `Plano: ${plans.find((plan: any) => plan.id === orgEditForm.planId)?.name || 'padrao'}` : 'Plano nao sera alterado neste perfil.'
+      ],
+      confirmLabel: 'Sim, salvar',
+      tone: 'warning'
+    });
+    if (!confirmed) return;
     try {
-      await api.organizations.update(editingOrg.id, {
+      const payload: any = {
         name: orgEditForm.name,
         document: orgEditForm.document,
         status: orgEditForm.status,
         themeConfig: { ...orgEditForm.themeConfig, accent: orgEditForm.accent, primary: orgEditForm.primary }
-      });
+      };
+      if (user?.isSuperAdmin) payload.planId = orgEditForm.planId || defaultPlanId;
+      const updated = await api.organizations.update(editingOrg.id, payload);
+      if (currentOrg?.id === updated.id) updateCurrentOrganization(updated);
       setEditingOrg(null);
       setMessage('Organizacao atualizada.');
       await refreshAll();
+      await confirm({
+        title: 'Organizacao atualizada',
+        description: `As alteracoes da organizacao "${orgEditForm.name}" foram salvas com sucesso.`,
+        confirmLabel: 'OK',
+        hideCancel: true,
+        tone: 'success'
+      });
     } catch (err: any) {
       setMessage(err?.response?.data?.message || 'Nao foi possivel atualizar a organizacao.');
     }
   }
 
   async function inactiveOrganization(id: string, name: string) {
-    if (!window.confirm(`Inativar a organizacao "${name}"?`)) return;
+    const confirmed = await confirm({
+      title: 'Inativar organizacao?',
+      description: `Tem certeza que deseja inativar a organizacao "${name}"? Os usuarios podem perder acesso ao ambiente.`,
+      confirmLabel: 'Sim, inativar',
+      tone: 'danger'
+    });
+    if (!confirmed) return;
     try {
       await api.organizations.remove(id);
       setMessage('Organizacao inativada.');
       await refreshAll();
+      await confirm({
+        title: 'Organizacao inativada',
+        description: `A organizacao "${name}" foi inativada com sucesso.`,
+        confirmLabel: 'OK',
+        hideCancel: true,
+        tone: 'success'
+      });
     } catch (err: any) {
       setMessage(err?.response?.data?.message || 'Nao foi possivel inativar a organizacao.');
     }
   }
 
   async function activateOrganization(id: string, name: string) {
-    if (!window.confirm(`Ativar a organizacao "${name}" novamente?`)) return;
+    const confirmed = await confirm({
+      title: 'Ativar organizacao?',
+      description: `Confirma a reativacao da organizacao "${name}"?`,
+      confirmLabel: 'Sim, ativar',
+      tone: 'success'
+    });
+    if (!confirmed) return;
     try {
       await api.organizations.update(id, { status: 'ACTIVE' });
       setMessage('Organizacao ativada novamente.');
       await refreshAll();
+      await confirm({
+        title: 'Organizacao ativada',
+        description: `A organizacao "${name}" foi reativada com sucesso.`,
+        confirmLabel: 'OK',
+        hideCancel: true,
+        tone: 'success'
+      });
     } catch (err: any) {
       setMessage(err?.response?.data?.message || 'Nao foi possivel ativar a organizacao.');
     }
@@ -163,11 +304,17 @@ export function OrganizationsPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <p className="eyebrow">Multi-tenant</p>
-        <h2 className="page-title">Organizacoes</h2>
-        <p className="mt-2 max-w-3xl text-sm text-slate-500">Cadastre, edite, inative e reative clientes. Admin Global gerencia qualquer org; Admin da Org gerencia setores da propria empresa.</p>
-      </div>
+      <section className="dashboard-gallery-hero selection-hero selection-hero-organizations">
+        <div className="dashboard-gallery-hero-content">
+          <p className="eyebrow text-white/80">Easy BI Workspace</p>
+          <h3>Administre organizacoes</h3>
+          <p>Cadastre clientes, ajuste planos, reative empresas e organize setores para cada ambiente do Easy BI.</p>
+        </div>
+        <div className="selection-hero-actions">
+          <span className="selection-hero-pill"><Building2 size={15} /> {organizations.length} organizacoes</span>
+          <span className="selection-hero-pill"><CreditCard size={15} /> {plans.length} planos</span>
+        </div>
+      </section>
 
       {user?.isSuperAdmin && (
         <section className="card-premium p-6">
@@ -178,9 +325,12 @@ export function OrganizationsPage() {
               <p className="text-sm text-slate-500">Ja deixe setores iniciais para facilitar o cadastro dos usuarios.</p>
             </div>
           </div>
-          <div className="grid gap-4 md:grid-cols-[1fr_220px] xl:grid-cols-[1fr_220px_1fr_180px]">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-[1fr_220px_220px_1fr_180px]">
             <input className="input" placeholder="Nome da organizacao" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
             <input className="input" placeholder="Documento/CNPJ" value={form.document} onChange={e => setForm({ ...form, document: e.target.value })} />
+            <select className="input" value={form.planId || defaultPlanId} onChange={e => setForm({ ...form, planId: e.target.value })}>
+              {plans.map((plan: any) => <option key={plan.id} value={plan.id}>{plan.name} - {formatPlanPrice(plan)}</option>)}
+            </select>
             <input className="input" placeholder="Setores iniciais separados por virgula" value={form.initialSectors} onChange={e => setForm({ ...form, initialSectors: e.target.value })} />
             <button className="btn-primary" onClick={createOrganization}>Criar</button>
           </div>
@@ -212,8 +362,9 @@ export function OrganizationsPage() {
             <input className="input" placeholder="Nome do setor" value={sectorForm.name} onChange={e => setSectorForm({ ...sectorForm, name: e.target.value })} />
             <input className="input" placeholder="Codigo opcional" value={sectorForm.code} onChange={e => setSectorForm({ ...sectorForm, code: e.target.value })} />
             <input className="input" placeholder="Descricao opcional" value={sectorForm.description} onChange={e => setSectorForm({ ...sectorForm, description: e.target.value })} />
-            <button className="btn-primary" disabled={!manageableOrgId} onClick={createSector}>Adicionar</button>
+            <button className="btn-primary disabled:opacity-50" disabled={!manageableOrgId || !hasPlanFeature(selectedOrganization, 'canCreateSectors')} onClick={createSector}>Adicionar</button>
           </div>
+          {!hasPlanFeature(selectedOrganization, 'canCreateSectors') && <p className="mt-3 rounded-2xl bg-amber-50 p-3 text-xs font-bold text-amber-700">O plano atual permite apenas o setor padrao. Para criar setores extras, o Super Admin precisa alterar o plano da organizacao.</p>}
 
           <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {sectors.map((sector: any) => (
@@ -269,6 +420,9 @@ export function OrganizationsPage() {
                     <option value="INACTIVE">Inativa</option>
                     <option value="BLOCKED">Bloqueada</option>
                   </select>
+                  <select className="input" value={orgEditForm.planId || defaultPlanId} onChange={e => setOrgEditForm({ ...orgEditForm, planId: e.target.value })}>
+                    {plans.map((plan: any) => <option key={plan.id} value={plan.id}>{plan.name} - {formatPlanPrice(plan)}</option>)}
+                  </select>
                   <div className="grid grid-cols-[1fr_120px] gap-2">
                     <input className="input" placeholder="Tema/acento" value={orgEditForm.accent} onChange={e => setOrgEditForm({ ...orgEditForm, accent: e.target.value.toUpperCase() })} />
                     <input className="input" type="color" value={orgEditForm.primary} onChange={e => setOrgEditForm({ ...orgEditForm, primary: e.target.value })} />
@@ -286,6 +440,15 @@ export function OrganizationsPage() {
                   </div>
                   <p className="mt-4 text-xl font-black text-slate-900">{org.name}</p>
                   <p className="mt-1 text-sm text-slate-500">/{org.slug}</p>
+                  <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-3">
+                    <div className="flex items-center gap-2">
+                      <CreditCard size={15} className="text-primary" />
+                      <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Plano</span>
+                    </div>
+                    <p className="mt-1 font-black text-slate-800">{org.plan?.name || 'Sem plano'}</p>
+                    {org.plan && <p className="mt-1 text-sm font-black text-primary">{formatPlanPrice(org.plan)}</p>}
+                    {org.plan?.limits && <p className="mt-1 text-xs font-bold text-slate-500">{formatLimit(org.plan.limits.maxUsers)} usuarios · {formatLimit(org.plan.limits.maxDatasets)} datasets · {formatLimit(org.plan.limits.maxDashboards)} dashboards</p>}
+                  </div>
                   <div className="mt-5 rounded-2xl bg-slate-50 p-3">
                     <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Tema</span>
                     <p className="font-bold text-slate-800">{org.themeConfig?.accent || 'PURPLE'}</p>

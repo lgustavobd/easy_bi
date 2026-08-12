@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { PrismaService } from '../../database/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { getAccessibleSectorIds, ensureSectorAccess } from '../../common/utils/sector-access';
+import { PlansService } from '../plans/plans.service';
 
 type FilterRule = {
   id?: string;
@@ -9,7 +10,7 @@ type FilterRule = {
   dimension?: string;
   value?: string;
   values?: string[];
-  operator?: 'equals' | 'contains' | 'notContains' | 'startsWith' | 'between' | 'empty' | string;
+  operator?: 'equals' | 'notEquals' | 'contains' | 'notContains' | 'startsWith' | 'endsWith' | 'in' | 'notIn' | 'between' | 'gte' | 'lte' | 'empty' | 'notEmpty' | string;
 };
 
 type DataRequest = {
@@ -43,12 +44,14 @@ type DatasetColumnMeta = {
 } | null;
 
 const DATASET_SCAN_CHUNK_SIZE = Number(process.env.DATASET_SCAN_CHUNK_SIZE || 5000);
+const DATA_TYPES = new Set(['TEXT', 'NUMBER', 'DATE', 'BOOLEAN', 'CURRENCY', 'PERCENTAGE']);
 
 @Injectable()
 export class DashboardsService {
-  constructor(private prisma: PrismaService, private audit: AuditLogsService) {}
+  constructor(private prisma: PrismaService, private audit: AuditLogsService, private plans: PlansService) {}
 
   async create(dto: any, organizationId: string, user: any) {
+    await this.plans.assertCanCreateDashboard(organizationId);
     const layoutConfig = this.normalizeDashboardLayout(dto.layoutConfig);
     let sector = null as any;
     if (layoutConfig.datasetId) {
@@ -159,6 +162,7 @@ export class DashboardsService {
 
   async duplicate(id: string, organizationId: string, user: any) {
     const source = await this.get(id, organizationId, user);
+    await this.plans.assertCanCreateDashboard(organizationId);
     const copy = await this.prisma.dashboard.create({
       data: {
         organizationId,
@@ -278,9 +282,9 @@ export class DashboardsService {
     const tableColumns = await this.resolveTableColumns(request.datasetId, request.tableColumns);
     const metricColumn = metric ? await this.resolveMetricColumn(request.datasetId, metric) : null;
     const dimensionColumn = dimension ? await this.resolveDatasetColumn(request.datasetId, dimension) : null;
-    const tableSortColumn = tableColumns.find((column) => this.isDateLikeColumn(column)) || null;
-    const metricFormatConfig = this.metricValueFormat(metricColumn);
     const aggregation = this.normalizeAggregation(request.aggregation || 'COUNT');
+    const tableSortColumn = tableColumns.find((column) => this.isDateLikeColumn(column)) || null;
+    const metricFormatConfig = ['COUNT', 'DISTINCT_COUNT'].includes(aggregation) ? { type: 'integer' } : this.metricValueFormat(metricColumn);
     const filters = this.keepOnlyDatasetFilters(Array.isArray(request.filters) ? request.filters : [], request.datasetId);
     const limit = Math.min(Math.max(Number(request.limit || 80), 1), 1000);
     const grouped = new Map<string, Accumulator>();
@@ -361,28 +365,62 @@ export class DashboardsService {
       where: { datasetId },
       select: { name: true, originalName: true, dataType: true, formatConfig: true }
     });
+    const templateColumns = await this.resolveTemplateColumns(datasetId);
     const byName = new Map(datasetColumns.map((column) => [column.name, column]));
     const missing = cleanColumns.filter((column) => !byName.has(column));
     if (missing.length) throw new BadRequestException('Uma ou mais colunas da tabela nao existem neste dataset.');
 
     return cleanColumns.map((name) => {
       const column = byName.get(name) as any;
-      return { name, label: column?.originalName || name, dataType: column?.dataType, formatConfig: column?.formatConfig };
+      const merged = this.mergeTemplateColumnFormat(column, templateColumns.get(this.normalizeColumnKey(name)));
+      return { name, label: merged?.originalName || name, dataType: merged?.dataType, formatConfig: merged?.formatConfig };
     });
   }
 
   private async resolveMetricColumn(datasetId: string, metricColumn: string): Promise<MetricColumnMeta> {
-    return this.prisma.datasetColumn.findFirst({
+    const column = await this.prisma.datasetColumn.findFirst({
       where: { datasetId, name: metricColumn },
       select: { name: true, dataType: true, formatConfig: true }
-    }) as Promise<MetricColumnMeta>;
+    });
+    const templateColumns = await this.resolveTemplateColumns(datasetId);
+    return this.mergeTemplateColumnFormat(column, templateColumns.get(this.normalizeColumnKey(metricColumn))) as MetricColumnMeta;
   }
 
   private async resolveDatasetColumn(datasetId: string, columnName: string): Promise<DatasetColumnMeta> {
-    return this.prisma.datasetColumn.findFirst({
+    const column = await this.prisma.datasetColumn.findFirst({
       where: { datasetId, name: columnName },
       select: { name: true, dataType: true, formatConfig: true }
-    }) as Promise<DatasetColumnMeta>;
+    });
+    const templateColumns = await this.resolveTemplateColumns(datasetId);
+    return this.mergeTemplateColumnFormat(column, templateColumns.get(this.normalizeColumnKey(columnName))) as DatasetColumnMeta;
+  }
+
+  private async resolveTemplateColumns(datasetId: string) {
+    const dataset = await this.prisma.dataset.findUnique({
+      where: { id: datasetId },
+      select: { importTemplate: { select: { detectedTypes: true } } }
+    });
+    const detectedTypes = Array.isArray(dataset?.importTemplate?.detectedTypes) ? dataset.importTemplate.detectedTypes : [];
+    return new Map(detectedTypes
+      .map((column: any) => [this.normalizeColumnKey(column?.name), column] as const)
+      .filter(([key]) => Boolean(key)));
+  }
+
+  private mergeTemplateColumnFormat(column: any, templateColumn: any) {
+    if (!column || !templateColumn) return column;
+    const dataType = String(templateColumn?.dataType || '').toUpperCase();
+    return {
+      ...column,
+      ...(DATA_TYPES.has(dataType) ? { dataType } : {}),
+      formatConfig: {
+        ...((column.formatConfig || {}) as any),
+        ...((templateColumn.formatConfig || {}) as any)
+      }
+    };
+  }
+
+  private normalizeColumnKey(value: string) {
+    return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_|_$/g, '').toLowerCase();
   }
 
   private toWidgetData(dashboardId: string, dto: any, includeDashboard = true) {
@@ -466,29 +504,75 @@ export class DashboardsService {
       const raw = row[filter.dimension];
       const text = String(raw ?? '');
       const operator = filter.operator || 'equals';
-      const values = Array.isArray(filter.values) && filter.values.length ? filter.values : (filter.value ? [filter.value] : []);
-      if (operator === 'empty') return !text;
-      if (!values.length) return true;
-      if (operator === 'between') {
-        const current = this.toDateTime(raw);
-        const start = this.toDateTime(values[0], false);
-        const end = this.toDateTime(values[1], true);
-        if (current === null) return false;
-        if (start !== null && current < start) return false;
-        if (end !== null && current > end) return false;
-        return true;
-      }
-      if (operator === 'contains') return values.some((value) => this.normalizeText(text).includes(this.normalizeText(value)));
-      if (operator === 'notContains') return values.every((value) => !this.normalizeText(text).includes(this.normalizeText(value)));
-      if (operator === 'startsWith') return values.some((value) => this.normalizeText(text).startsWith(this.normalizeText(value)));
-      if (values.length === 1 && /^\d{4}-\d{2}-\d{2}$/.test(String(values[0]))) {
-        const current = this.toDateTime(raw);
-        const targetStart = this.toDateTime(values[0], false);
-        const targetEnd = this.toDateTime(values[0], true);
-        if (current !== null && targetStart !== null && targetEnd !== null) return current >= targetStart && current <= targetEnd;
-      }
-      return values.some((value) => text === String(value));
+      const values = (Array.isArray(filter.values) && filter.values.length ? filter.values : (filter.value ? String(filter.value).split('|') : []))
+        .map((value) => String(value ?? '').trim());
+      if (operator === 'empty') return !text.trim();
+      if (operator === 'notEmpty') return Boolean(text.trim());
+      if (!values.some(Boolean)) return true;
+      if (operator === 'between') return this.matchesBetween(raw, values);
+      if (operator === 'gte' || operator === 'lte') return this.matchesLimit(raw, values[0], operator);
+      const filledValues = values.filter(Boolean);
+      if (operator === 'contains') return filledValues.some((value) => this.normalizeText(text).includes(this.normalizeText(value)));
+      if (operator === 'notContains') return filledValues.every((value) => !this.normalizeText(text).includes(this.normalizeText(value)));
+      if (operator === 'startsWith') return filledValues.some((value) => this.normalizeText(text).startsWith(this.normalizeText(value)));
+      if (operator === 'endsWith') return filledValues.some((value) => this.normalizeText(text).endsWith(this.normalizeText(value)));
+      if (operator === 'notEquals' || operator === 'notIn') return filledValues.every((value) => !this.sameFilterValue(raw, value));
+      return filledValues.some((value) => this.sameFilterValue(raw, value));
     });
+  }
+
+  private matchesBetween(raw: any, values: string[]) {
+    const [startValue, endValue] = values;
+    if (this.isDateFilterValue(startValue) || this.isDateFilterValue(endValue)) {
+      const current = this.toDateTime(raw);
+      const start = this.toDateTime(startValue, false);
+      const end = this.toDateTime(endValue, true);
+      if (current === null) return false;
+      if (start !== null && current < start) return false;
+      if (end !== null && current > end) return false;
+      return true;
+    }
+
+    const currentNumber = this.toNumber(raw);
+    if (Number.isNaN(currentNumber)) return false;
+    const startNumber = startValue ? this.toNumber(startValue) : Number.NaN;
+    const endNumber = endValue ? this.toNumber(endValue) : Number.NaN;
+    if (!Number.isNaN(startNumber) && currentNumber < startNumber) return false;
+    if (!Number.isNaN(endNumber) && currentNumber > endNumber) return false;
+    return true;
+  }
+
+  private matchesLimit(raw: any, value: string, operator: string) {
+    if (this.isDateFilterValue(value)) {
+      const current = this.toDateTime(raw);
+      const target = this.toDateTime(value, operator === 'lte');
+      if (current === null || target === null) return false;
+      return operator === 'gte' ? current >= target : current <= target;
+    }
+
+    const currentNumber = this.toNumber(raw);
+    const targetNumber = this.toNumber(value);
+    if (Number.isNaN(currentNumber) || Number.isNaN(targetNumber)) return false;
+    return operator === 'gte' ? currentNumber >= targetNumber : currentNumber <= targetNumber;
+  }
+
+  private sameFilterValue(raw: any, value: string) {
+    if (this.isDateFilterValue(value)) {
+      const current = this.toDateTime(raw);
+      const targetStart = this.toDateTime(value, false);
+      const targetEnd = this.toDateTime(value, true);
+      if (current !== null && targetStart !== null && targetEnd !== null) return current >= targetStart && current <= targetEnd;
+    }
+
+    const rawNumber = this.toNumber(raw);
+    const targetNumber = this.toNumber(value);
+    if (!Number.isNaN(rawNumber) && !Number.isNaN(targetNumber)) return rawNumber === targetNumber;
+    return this.normalizeText(String(raw ?? '')) === this.normalizeText(value);
+  }
+
+  private isDateFilterValue(value?: string) {
+    const text = String(value || '').trim();
+    return /^\d{4}-\d{1,2}-\d{1,2}$/.test(text) || /^\d{1,2}\/\d{1,2}\/(\d{2}|\d{4})$/.test(text);
   }
 
   private normalizeAggregation(type: string) {
@@ -609,7 +693,19 @@ export class DashboardsService {
         durationInput: config.durationInput || 'duration_text'
       };
     }
-    return null;
+
+    const format: Record<string, any> = {};
+    const type = String(config?.type || '').trim();
+    if (type && type !== 'auto') format.type = type;
+    if (config?.prefix !== undefined) format.prefix = String(config.prefix || '');
+    if (config?.suffix !== undefined) format.suffix = String(config.suffix || '');
+    if (config?.currency) format.currency = String(config.currency).trim().toUpperCase();
+    if (config?.decimals !== undefined && Number.isFinite(Number(config.decimals))) {
+      format.decimals = Math.max(0, Math.min(Number(config.decimals), 6));
+    }
+    if (config?.scale !== undefined && Number.isFinite(Number(config.scale))) format.scale = Number(config.scale);
+
+    return Object.keys(format).length ? format : null;
   }
 
   private toMetricNumber(value: any, column: MetricColumnMeta) {

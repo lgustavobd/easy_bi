@@ -9,6 +9,21 @@ export const api = {
     uploadBrandImage: async (id: string, form: FormData) => (await http.post(`/organizations/${id}/brand-image`, form, { headers: { 'Content-Type': 'multipart/form-data' } })).data,
     remove: async (id: string) => (await http.delete(`/organizations/${id}`)).data
   },
+  plans: {
+    list: async () => (await http.get('/plans')).data,
+    publicList: async () => (await http.get('/plans/public')).data
+  },
+  accessRequests: {
+    create: async (payload: any) => (await http.post('/access-requests', payload)).data,
+    list: async () => (await http.get('/access-requests')).data,
+    review: async (id: string, payload: any) => (await http.post(`/access-requests/${id}/review`, payload)).data
+  },
+  planChangeRequests: {
+    create: async (payload: any) => (await http.post('/plan-change-requests', payload)).data,
+    list: async () => (await http.get('/plan-change-requests')).data,
+    impact: async (planId: string) => (await http.get(`/plan-change-requests/impact/${planId}`)).data,
+    review: async (id: string, payload: any) => (await http.post(`/plan-change-requests/${id}/review`, payload)).data
+  },
   sectors: {
     list: async (params: any = {}) => (await http.get('/sectors', { params })).data,
     create: async (payload: any) => (await http.post('/sectors', payload)).data,
@@ -35,6 +50,7 @@ export const api = {
     rows: async (id: string, params: any = {}) => (await http.get(`/datasets/${id}/rows`, { params })).data,
     upload: async (form: FormData) => (await http.post('/datasets/upload', form, { headers: { 'Content-Type': 'multipart/form-data' } })).data,
     workbookSheets: async (form: FormData) => (await http.post('/datasets/workbook-sheets', form, { headers: { 'Content-Type': 'multipart/form-data' } })).data,
+    ensureImportTemplate: async (id: string) => (await http.post(`/datasets/${id}/import-template`)).data,
     replaceFile: async (id: string, form: FormData) => (await http.post(`/datasets/${id}/replace-file`, form, { headers: { 'Content-Type': 'multipart/form-data' } })).data,
     appendFile: async (id: string, form: FormData) => (await http.post(`/datasets/${id}/append-file`, form, { headers: { 'Content-Type': 'multipart/form-data' } })).data,
     patchRows: async (id: string, form: FormData) => (await http.post(`/datasets/${id}/patch-rows`, form, { headers: { 'Content-Type': 'multipart/form-data' } })).data,

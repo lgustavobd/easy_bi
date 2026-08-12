@@ -2,20 +2,24 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import { PrismaService } from '../../database/prisma.service';
 import { slugify } from '../../common/utils/slugify';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { PlansService } from '../plans/plans.service';
 
 @Injectable()
 export class OrganizationsService {
-  constructor(private prisma: PrismaService, private audit: AuditLogsService) {}
+  constructor(private prisma: PrismaService, private audit: AuditLogsService, private plans: PlansService) {}
 
   async create(dto: any, user: any) {
     if (!user.isSuperAdmin) throw new ForbiddenException('Apenas Super Admin pode criar organizacoes.');
+    const planId = await this.plans.resolveAssignablePlanId(dto.planId);
     const org = await this.prisma.organization.create({
       data: {
         name: dto.name,
         slug: slugify(dto.name),
         document: dto.document,
+        planId: planId || undefined,
         themeConfig: dto.themeConfig || { accent: 'PURPLE', primary: '#7C3AED' }
-      }
+      },
+      include: { plan: true }
     });
     await this.prisma.sector.create({
       data: {
@@ -30,19 +34,24 @@ export class OrganizationsService {
     return org;
   }
 
-  list(user: any) {
-    if (user.isSuperAdmin) return this.prisma.organization.findMany({ orderBy: [{ status: 'asc' }, { name: 'asc' }] });
-    return this.prisma.organization.findMany({
+  async list(user: any) {
+    if (user.isSuperAdmin) {
+      const organizations = await this.prisma.organization.findMany({ include: { plan: true }, orderBy: [{ status: 'asc' }, { name: 'asc' }] });
+      return organizations.map((org) => this.withSerializedPlan(org));
+    }
+    const organizations = await this.prisma.organization.findMany({
       where: { users: { some: { userId: user.id, status: 'ACTIVE' } }, deletedAt: null },
+      include: { plan: true },
       orderBy: { name: 'asc' }
     });
+    return organizations.map((org) => this.withSerializedPlan(org));
   }
 
   async get(id: string, user: any) {
     if (!user.isSuperAdmin) await this.ensureMembership(user.id, id);
-    const org = await this.prisma.organization.findFirst({ where: { id, ...(user.isSuperAdmin ? {} : { deletedAt: null }) } });
+    const org = await this.prisma.organization.findFirst({ where: { id, ...(user.isSuperAdmin ? {} : { deletedAt: null }) }, include: { plan: true } });
     if (!org) throw new NotFoundException('Organizacao nao encontrada.');
-    return org;
+    return this.withSerializedPlan(org);
   }
 
   async summary(user: any) {
@@ -71,7 +80,7 @@ export class OrganizationsService {
       rowsByOrg,
       auditByOrg
     ] = await Promise.all([
-      this.prisma.organization.findMany({ orderBy: { name: 'asc' }, select: { id: true, name: true, slug: true, status: true, createdAt: true, updatedAt: true, deletedAt: true } }),
+      this.prisma.organization.findMany({ orderBy: { name: 'asc' }, include: { plan: true } }),
       this.prisma.user.count({ where: { deletedAt: null } }),
       this.prisma.user.count({ where: { deletedAt: null, status: 'ACTIVE' } }),
       this.prisma.user.count({ where: { deletedAt: null, isSuperAdmin: true } }),
@@ -103,6 +112,7 @@ export class OrganizationsService {
 
     const organizationUsage = organizations.map(org => ({
       ...org,
+      plan: this.plans.serialize((org as any).plan),
       users: userCountByOrg.get(org.id) || 0,
       datasets: datasetCountByOrg.get(org.id) || 0,
       dashboards: dashboardCountByOrg.get(org.id) || 0,
@@ -146,8 +156,18 @@ export class OrganizationsService {
         data.status = dto.status;
         data.deletedAt = dto.status === 'ACTIVE' ? null : org.deletedAt || new Date();
       }
+      if (dto.planId !== undefined) {
+        if (dto.planId) {
+          const planId = await this.plans.resolveAssignablePlanId(dto.planId);
+          await this.plans.assertOrganizationFitsPlan(id, planId, 'alterar o plano da organizacao');
+          data.planId = planId;
+        } else {
+          data.planId = null;
+        }
+      }
       if (dto.themeConfig !== undefined) data.themeConfig = dto.themeConfig;
     } else {
+      if (dto.planId !== undefined) throw new ForbiddenException('Apenas Super Admin pode alterar o plano da organizacao.');
       if (!currentOrg || currentOrg !== id) throw new ForbiddenException('Admin da organizacao so pode alterar a propria organizacao.');
       const membership = await this.prisma.userOrganization.findUnique({ where: { userId_organizationId: { userId: user.id, organizationId: id } }, include: { role: true } });
       if (membership?.role.code !== 'ORG_ADMIN') throw new ForbiddenException('Apenas Admin da Organizacao pode personalizar aparencia.');
@@ -155,15 +175,16 @@ export class OrganizationsService {
       data.themeConfig = dto.themeConfig;
     }
 
-    const updated = await this.prisma.organization.update({ where: { id: org.id }, data });
-    await this.audit.register({ organizationId: id, userId: user.id, action: 'organization.updated', entity: 'organization', entityId: id, metadata: { status: dto.status, themeConfig: dto.themeConfig } });
-    return updated;
+    const updated = await this.prisma.organization.update({ where: { id: org.id }, data, include: { plan: true } });
+    await this.audit.register({ organizationId: id, userId: user.id, action: 'organization.updated', entity: 'organization', entityId: id, metadata: { status: dto.status, themeConfig: dto.themeConfig, planId: dto.planId } });
+    return this.withSerializedPlan(updated);
   }
 
   async uploadBrandImage(id: string, file: Express.Multer.File, user: any, currentOrg?: string) {
     if (!file) throw new BadRequestException('Imagem nao enviada.');
     const org = await this.get(id, user);
     await this.ensureAppearancePermission(id, user, currentOrg);
+    await this.plans.assertFeature(id, 'canUseCustomLogo');
 
     const themeConfig = {
       ...((org.themeConfig as any) || {}),
@@ -172,7 +193,7 @@ export class OrganizationsService {
       brandImageUpdatedAt: new Date().toISOString()
     };
 
-    const updated = await this.prisma.organization.update({ where: { id: org.id }, data: { themeConfig } });
+    const updated = await this.prisma.organization.update({ where: { id: org.id }, data: { themeConfig }, include: { plan: true } });
     await this.audit.register({
       organizationId: id,
       userId: user.id,
@@ -181,7 +202,7 @@ export class OrganizationsService {
       entityId: id,
       metadata: { brandImageUrl: themeConfig.brandImageUrl }
     });
-    return updated;
+    return this.withSerializedPlan(updated);
   }
 
   async remove(id: string, user: any) {
@@ -201,5 +222,9 @@ export class OrganizationsService {
     if (!currentOrg || currentOrg !== organizationId) throw new ForbiddenException('Admin da organizacao so pode alterar a propria organizacao.');
     const membership = await this.prisma.userOrganization.findUnique({ where: { userId_organizationId: { userId: user.id, organizationId } }, include: { role: true } });
     if (membership?.role.code !== 'ORG_ADMIN') throw new ForbiddenException('Apenas Admin da Organizacao pode personalizar aparencia.');
+  }
+
+  private withSerializedPlan(org: any) {
+    return { ...org, plan: this.plans.serialize(org?.plan) };
   }
 }

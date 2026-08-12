@@ -62,14 +62,12 @@ function ExecutiveCard({ title, value, detail, icon: Icon, tone = 'orange' }: { 
   }[tone];
 
   return (
-    <div className="group rounded-[1.6rem] border border-slate-200 bg-white/90 p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-orange-200 hover:shadow-soft">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">{title}</p>
-          <p className="mt-2 text-3xl font-black tracking-tight text-slate-950">{value}</p>
-          <p className="mt-1 text-xs font-bold text-slate-500">{detail}</p>
-        </div>
-        <div className={`rounded-2xl p-3 transition group-hover:scale-105 ${toneClass}`}><Icon size={20} /></div>
+    <div className="group relative min-h-[138px] overflow-hidden rounded-[1.55rem] border border-slate-200 bg-white/95 p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-soft">
+      <div className={`absolute right-4 top-4 rounded-2xl p-3 transition group-hover:scale-105 ${toneClass}`}><Icon size={19} /></div>
+      <div className="relative max-w-[78%]">
+        <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">{title}</p>
+        <p className="mt-3 text-4xl font-black leading-none tracking-tight text-slate-950">{value}</p>
+        <p className="mt-3 text-xs font-bold leading-snug text-slate-500">{detail}</p>
       </div>
     </div>
   );
@@ -80,10 +78,10 @@ function ProgressInsight({ label, value, detail }: { label: string; value: numbe
     <div className="rounded-2xl border border-slate-100 bg-white p-4">
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm font-black text-slate-900">{label}</p>
-        <span className="rounded-full bg-orange-50 px-2.5 py-1 text-xs font-black text-orange-700">{value}%</span>
+        <span className="rounded-full px-2.5 py-1 text-xs font-black" style={{ backgroundColor: 'var(--easy-primary-soft)', color: 'var(--easy-primary)' }}>{value}%</span>
       </div>
       <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100">
-        <div className="h-full rounded-full bg-gradient-to-r from-orange-500 to-orange-300" style={{ width: `${value}%` }} />
+        <div className="h-full rounded-full" style={{ width: `${value}%`, background: 'linear-gradient(90deg, var(--easy-primary), var(--easy-primary-3))' }} />
       </div>
       <p className="mt-2 text-xs font-semibold text-slate-500">{detail}</p>
     </div>
@@ -130,32 +128,28 @@ export function HomePage() {
 
   return (
     <div className="space-y-6">
-      <section className="relative overflow-hidden rounded-[2rem] border border-slate-900/10 bg-slate-950 p-7 text-white shadow-soft">
-        <div className="pointer-events-none absolute -right-20 -top-24 h-72 w-72 rounded-full bg-orange-500/25 blur-3xl" />
-        <div className="pointer-events-none absolute bottom-0 left-1/2 h-40 w-80 -translate-x-1/2 rounded-full bg-white/10 blur-3xl" />
-        <div className="relative flex flex-wrap items-start justify-between gap-6">
-          <div>
-            <p className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-black uppercase tracking-[0.18em] text-orange-200"><Sparkles size={14} /> Visao geral</p>
-            <h2 className="mt-4 max-w-4xl text-4xl font-black tracking-tight text-white">Painel vivo da operacao</h2>
-            <p className="mt-3 max-w-3xl text-sm font-medium leading-6 text-slate-300">Resumo rapido para entender se os dados estao saudaveis, quais datasets sustentam os dashboards e onde houve atividade recente.</p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Link to="/datasets/upload" className="btn-light"><Database size={16} /> Datasets</Link>
-            <Link to="/dashboards/new" className="btn-primary"><Plus size={16} /> Novo dashboard</Link>
-          </div>
+      <section className="dashboard-gallery-hero selection-hero selection-hero-overview">
+        <div className="dashboard-gallery-hero-content">
+          <p className="eyebrow text-white/80">Easy BI Workspace</p>
+          <h3>Painel vivo da operacao</h3>
+          <p>Resumo rapido para entender se os dados estao saudaveis, quais datasets sustentam os dashboards e onde houve atividade recente.</p>
         </div>
-        <div className="relative mt-7 grid gap-3 md:grid-cols-3">
-          <div className="rounded-3xl border border-white/10 bg-white/10 p-4 backdrop-blur">
-            <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-300">Linhas importadas</p>
-            <p className="mt-2 text-3xl font-black">{formatNumber(rowCount)}</p>
+        <div className="selection-hero-actions">
+          <Link to="/datasets/upload" className="dashboard-gallery-new-btn"><Database size={16} /> Datasets</Link>
+          <Link to="/dashboards/new" className="dashboard-gallery-new-btn"><Plus size={16} /> Novo dashboard</Link>
+        </div>
+        <div className="selection-hero-metrics">
+          <div>
+            <p>Linhas importadas</p>
+            <strong>{formatNumber(rowCount)}</strong>
           </div>
-          <div className="rounded-3xl border border-white/10 bg-white/10 p-4 backdrop-blur">
-            <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-300">Publicacao</p>
-            <p className="mt-2 text-3xl font-black">{publicationRate}%</p>
+          <div>
+            <p>Publicacao</p>
+            <strong>{publicationRate}%</strong>
           </div>
-          <div className="rounded-3xl border border-white/10 bg-white/10 p-4 backdrop-blur">
-            <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-300">Saude dos dados</p>
-            <p className="mt-2 text-3xl font-black">{dataHealth}%</p>
+          <div>
+            <p>Saude dos dados</p>
+            <strong>{dataHealth}%</strong>
           </div>
         </div>
       </section>
@@ -164,63 +158,97 @@ export function HomePage() {
         <div className="card-premium flex items-center gap-3 p-6 text-sm font-bold text-slate-500"><Loader2 className="animate-spin" size={18} /> Carregando resumo do banco...</div>
       ) : (
         <>
-          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <ExecutiveCard title="Dashboards" value={formatNumber(dashboards.length)} detail={`${formatNumber(publishedCount)} publicados - ${formatNumber(draftCount)} rascunhos`} icon={LayoutDashboard} />
             <ExecutiveCard title="Datasets" value={formatNumber(datasets.length)} detail={`${formatNumber(readyDatasets || healthyDatasets)} prontos - ${formatNumber(failedDatasets)} falhas`} icon={Database} tone="blue" />
-            <ExecutiveCard title="Widgets" value={formatNumber(widgetCount)} detail={`${formatNumber(totalColumns)} colunas disponiveis`} icon={BarChart3} tone="green" />
-            <ExecutiveCard title="Usuarios" value={users.length ? formatNumber(users.length) : '-'} detail={users.length ? `${formatNumber(activeUsers)} ativos` : 'conforme permissao do perfil'} icon={Users} tone="slate" />
+            <ExecutiveCard title="Quadros" value={formatNumber(widgetCount)} detail={`${formatNumber(totalColumns)} colunas disponiveis`} icon={BarChart3} tone="green" />
+            <ExecutiveCard title="Usuarios" value={users.length ? formatNumber(users.length) : '-'} detail={users.length ? `${formatNumber(activeUsers)} ativos` : 'conforme permissao'} icon={Users} tone="slate" />
           </section>
 
-          <section className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
+          <section className="grid gap-6 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
             <div className="card-premium overflow-hidden">
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-5">
-                <div>
-                  <p className="text-lg font-black text-slate-950">Mapa da operacao</p>
-                  <p className="mt-1 text-sm font-semibold text-slate-500">Indicadores de qualidade e uso para bater o olho.</p>
+                <div className="flex items-center gap-3">
+                  <div className="rounded-2xl bg-slate-950 p-3 text-white"><Gauge size={20} /></div>
+                  <div>
+                    <p className="text-lg font-black text-slate-950">Saude operacional</p>
+                    <p className="text-sm font-semibold text-slate-500">Publicacao, cargas e cobertura dos modelos.</p>
+                  </div>
                 </div>
-                <span className="rounded-full bg-orange-50 px-3 py-1 text-xs font-black text-orange-700"><Gauge size={13} className="mr-1 inline" /> pulso atual</span>
+                <span className="rounded-full px-3 py-1 text-xs font-black" style={{ backgroundColor: 'var(--easy-primary-soft)', color: 'var(--easy-primary)' }}>
+                  {failedDatasets ? `${formatNumber(failedDatasets)} falha(s)` : 'Sem falhas criticas'}
+                </span>
               </div>
-              <div className="grid gap-4 p-5 md:grid-cols-3">
+              <div className="grid gap-3 p-5">
                 <ProgressInsight label="Dashboards publicados" value={publicationRate} detail={`${formatNumber(publishedCount)} de ${formatNumber(dashboards.length)} dashboards publicados`} />
                 <ProgressInsight label="Datasets sem falha" value={dataHealth} detail={`${formatNumber(failedDatasets)} dataset(s) com falha para acompanhar`} />
                 <ProgressInsight label="Cobertura dos modelos" value={modelCoverage} detail={`${formatNumber(totalColumns)} colunas mapeadas nos datasets`} />
               </div>
-              <div className="grid gap-3 border-t border-slate-100 bg-slate-50/70 p-5 sm:grid-cols-2 lg:grid-cols-4">
-                <div className="rounded-2xl bg-white p-4 shadow-sm">
-                  <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">Media por dataset</p>
-                  <p className="mt-2 text-2xl font-black text-slate-950">{formatNumber(averageRows)}</p>
-                  <p className="mt-1 text-xs font-bold text-slate-500">linhas em media por base</p>
+            </div>
+
+            <div className="card-premium overflow-hidden">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-5">
+                <div className="flex items-center gap-3">
+                  <div className="rounded-2xl p-3 text-white shadow-soft" style={{ background: 'linear-gradient(135deg, var(--easy-primary), var(--easy-primary-2))' }}>
+                    <Sparkles size={20} />
+                  </div>
+                  <div>
+                    <p className="text-lg font-black text-slate-950">Mapa dos dados</p>
+                    <p className="text-sm font-semibold text-slate-500">Volume, maior base e sinais importantes para acompanhar.</p>
+                  </div>
                 </div>
-                <div className="rounded-2xl bg-white p-4 shadow-sm">
-                  <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">Maior base</p>
-                  <p className="mt-2 truncate text-2xl font-black text-slate-950">{biggestDataset?.name || '-'}</p>
-                  <p className="mt-1 text-xs font-bold text-slate-500">{formatNumber(biggestDataset?.rowCount || 0)} linhas</p>
+                <span className="rounded-full px-3 py-1 text-xs font-black" style={{ backgroundColor: 'var(--easy-primary-soft)', color: 'var(--easy-primary)' }}>
+                  <Clock3 size={13} className="mr-1 inline" /> atualizado agora
+                </span>
+              </div>
+
+              <div className="grid gap-3 p-5">
+                <div className="relative overflow-hidden rounded-[1.35rem] border border-slate-200 bg-slate-950 p-4 text-white shadow-sm">
+                  <div className="absolute -right-8 -top-12 h-32 w-32 rounded-full opacity-25" style={{ background: 'var(--easy-primary)' }} />
+                  <div className="relative">
+                    <p className="text-xs font-black uppercase tracking-[0.18em] text-white/60">Linhas importadas</p>
+                    <p className="mt-2 text-4xl font-black tracking-tight">{formatNumber(rowCount)}</p>
+                    <p className="mt-1 text-xs font-bold text-white/65">{formatNumber(datasets.length)} dataset(s) - {formatNumber(totalColumns)} coluna(s)</p>
+                  </div>
                 </div>
-                <div className="rounded-2xl bg-white p-4 shadow-sm">
-                  <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">Eventos visiveis</p>
-                  <p className="mt-2 text-2xl font-black text-slate-950">{formatNumber(auditLogs.length)}</p>
-                  <p className="mt-1 text-xs font-bold text-slate-500">registros de auditoria carregados</p>
+                <div className="flex items-center justify-between gap-4 rounded-[1.2rem] border border-slate-100 bg-white p-4 shadow-sm">
+                  <div>
+                    <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-400">Media</p>
+                    <p className="mt-1 text-xs font-bold text-slate-500">linhas/dataset</p>
+                  </div>
+                  <p className="text-2xl font-black text-slate-950">{formatNumber(averageRows)}</p>
                 </div>
-                <div className="rounded-2xl bg-white p-4 shadow-sm">
-                  <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">Status das cargas</p>
-                  <p className="mt-2 text-2xl font-black text-slate-950">{formatNumber(readyDatasets || healthyDatasets)}/{formatNumber(datasets.length)}</p>
-                  <p className="mt-1 text-xs font-bold text-slate-500">prontas ou sem falha critica</p>
+                <div className="flex items-center justify-between gap-4 rounded-[1.2rem] border border-slate-100 bg-white p-4 shadow-sm">
+                  <div className="min-w-0">
+                    <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-400">Maior base</p>
+                    <p className="mt-1 text-xs font-bold text-slate-500">{formatNumber(biggestDataset?.rowCount || 0)} linhas</p>
+                  </div>
+                  <p className="max-w-[52%] truncate text-right text-xl font-black text-slate-950">{biggestDataset?.name || '-'}</p>
+                </div>
+                <div className="flex items-center justify-between gap-4 rounded-[1.2rem] border border-slate-100 bg-white p-4 shadow-sm">
+                  <div>
+                    <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-400">Cargas</p>
+                    <p className="mt-1 text-xs font-bold text-slate-500">prontas</p>
+                  </div>
+                  <p className="text-2xl font-black text-slate-950">{formatNumber(readyDatasets || healthyDatasets)}/{formatNumber(datasets.length)}</p>
                 </div>
               </div>
             </div>
+          </section>
 
-            <div className="card-premium p-5">
-              <div className="flex items-center gap-3">
+          <section className="grid gap-6 xl:grid-cols-[minmax(0,0.72fr)_minmax(0,1.28fr)]">
+            <div className="card-premium overflow-hidden">
+              <div className="flex items-center gap-3 border-b border-slate-100 p-5">
                 <div className="rounded-2xl bg-slate-950 p-3 text-white"><Activity size={20} /></div>
                 <div>
                   <p className="text-lg font-black text-slate-950">Atividade recente</p>
                   <p className="text-sm font-semibold text-slate-500">Ultimos eventos visiveis para seu perfil.</p>
                 </div>
               </div>
-              <div className="mt-5 max-h-[360px] space-y-3 overflow-y-auto pr-1">
+              <div className="max-h-[330px] space-y-3 overflow-y-auto p-5 pr-3">
                 {recentActivity.map((log: any) => (
-                  <div key={log.id} className="flex gap-3 rounded-2xl border border-slate-100 bg-white p-3">
-                    <div className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full bg-orange-500 shadow-[0_0_0_4px_rgba(249,115,22,0.12)]" />
+                  <div key={log.id} className="flex gap-3 rounded-2xl border border-slate-100 bg-white p-3 shadow-sm">
+                    <div className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full shadow-[0_0_0_4px_var(--easy-primary-soft)]" style={{ backgroundColor: 'var(--easy-primary)' }} />
                     <div className="min-w-0">
                       <p className="truncate text-sm font-black text-slate-900">{log.action}</p>
                       <p className="mt-1 text-xs font-semibold text-slate-400">{log.entity || 'evento'} - {formatDate(log.createdAt)}</p>
@@ -230,9 +258,35 @@ export function HomePage() {
                 {!recentActivity.length && <p className="rounded-2xl border border-dashed border-slate-300 p-5 text-sm font-bold text-slate-500">Sem logs disponiveis para este perfil.</p>}
               </div>
             </div>
+
+            <div className="card-premium overflow-hidden">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-5">
+                <div>
+                  <p className="text-lg font-black text-slate-950">Leitura rapida</p>
+                  <p className="mt-1 text-sm font-semibold text-slate-500">Dados de apoio para entender o ambiente sem abrir outras telas.</p>
+                </div>
+              </div>
+              <div className="grid gap-3 p-5 sm:grid-cols-3">
+                <div className="rounded-[1.35rem] border border-slate-100 bg-white p-4 shadow-sm">
+                  <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-400">Auditoria</p>
+                  <p className="mt-2 text-3xl font-black text-slate-950">{formatNumber(auditLogs.length)}</p>
+                  <p className="mt-1 text-xs font-bold text-slate-500">eventos carregados</p>
+                </div>
+                <div className="rounded-[1.35rem] border border-slate-100 bg-white p-4 shadow-sm">
+                  <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-400">Rascunhos</p>
+                  <p className="mt-2 text-3xl font-black text-slate-950">{formatNumber(draftCount)}</p>
+                  <p className="mt-1 text-xs font-bold text-slate-500">dashboards pendentes</p>
+                </div>
+                <div className="rounded-[1.35rem] border border-slate-100 bg-white p-4 shadow-sm">
+                  <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-400">Usuarios ativos</p>
+                  <p className="mt-2 text-3xl font-black text-slate-950">{users.length ? formatNumber(activeUsers) : '-'}</p>
+                  <p className="mt-1 text-xs font-bold text-slate-500">no workspace atual</p>
+                </div>
+              </div>
+            </div>
           </section>
 
-          <section className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
+          <section className="grid gap-6 xl:grid-cols-2">
             <div className="card-premium overflow-hidden">
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-5">
                 <div>
@@ -241,20 +295,25 @@ export function HomePage() {
                 </div>
                 <Link to="/datasets/upload" className="btn-muted px-3 py-2 text-xs">Abrir datasets</Link>
               </div>
-              <div className="space-y-3 p-5">
-                {topDatasets.map((dataset: any) => {
+              <div className="max-h-[390px] space-y-3 overflow-y-auto p-5 pr-3">
+                {topDatasets.map((dataset: any, index: number) => {
                   const rows = Number(dataset.rowCount || 0);
                   return (
-                    <div key={dataset.id} className="rounded-2xl border border-slate-100 bg-white p-4">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="truncate font-black text-slate-950">{dataset.name}</p>
-                          <p className="mt-1 text-xs font-bold text-slate-400">{statusLabel(dataset.status)} - {(dataset.columns || []).length} colunas</p>
+                    <div key={dataset.id} className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
+                      <div className="flex items-start gap-3">
+                        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-2xl text-xs font-black" style={{ backgroundColor: 'var(--easy-primary-soft)', color: 'var(--easy-primary)' }}>{index + 1}</span>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="truncate font-black text-slate-950">{dataset.name}</p>
+                              <p className="mt-1 text-xs font-bold text-slate-400">{statusLabel(dataset.status)} - {(dataset.columns || []).length} colunas</p>
+                            </div>
+                            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-600">{formatNumber(rows)}</span>
+                          </div>
+                          <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100">
+                            <div className="h-full rounded-full" style={{ width: `${percent(rows, maxDatasetRows)}%`, background: 'linear-gradient(90deg, var(--easy-primary), var(--easy-primary-3))' }} />
+                          </div>
                         </div>
-                        <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-600">{formatNumber(rows)}</span>
-                      </div>
-                      <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100">
-                        <div className="h-full rounded-full bg-slate-900" style={{ width: `${percent(rows, maxDatasetRows)}%` }} />
                       </div>
                     </div>
                   );
@@ -271,11 +330,11 @@ export function HomePage() {
                 </div>
                 <Link to="/dashboards" className="btn-muted px-3 py-2 text-xs">Ver todos</Link>
               </div>
-              <div className="divide-y divide-slate-100">
+              <div className="max-h-[390px] divide-y divide-slate-100 overflow-y-auto">
                 {recentDashboards.map((dashboard: any) => (
-                  <Link key={dashboard.id} to={`/dashboards/${dashboard.id}/view`} className="flex items-center justify-between gap-4 bg-white/70 px-5 py-4 transition hover:bg-orange-50/60">
+                  <Link key={dashboard.id} to={`/dashboards/${dashboard.id}/view`} className="flex items-center justify-between gap-4 bg-white/80 px-5 py-4 transition hover:bg-slate-50">
                     <div className="flex min-w-0 items-center gap-3">
-                      <div className="rounded-2xl bg-orange-50 p-3 text-orange-600"><LayoutDashboard size={18} /></div>
+                      <div className="rounded-2xl p-3" style={{ backgroundColor: 'var(--easy-primary-soft)', color: 'var(--easy-primary)' }}><LayoutDashboard size={18} /></div>
                       <div className="min-w-0">
                         <p className="truncate font-black text-slate-950">{dashboard.name}</p>
                         <p className="mt-1 text-xs font-semibold text-slate-400">{dashboard.widgets?.length || 0} quadros - {dashboard.isPublished ? 'publicado' : 'rascunho'} - {formatDate(dashboard.updatedAt || dashboard.createdAt)}</p>
@@ -289,22 +348,30 @@ export function HomePage() {
             </div>
           </section>
 
-          <section className="grid gap-4 md:grid-cols-3">
-            <Link to="/datasets/upload" className="rounded-[1.5rem] border border-slate-200 bg-white/90 p-5 transition hover:-translate-y-0.5 hover:border-orange-300 hover:bg-orange-50">
-              <FileSpreadsheet className="text-orange-600" size={22} />
-              <p className="mt-3 font-black text-slate-950">Atualizar dados</p>
-              <p className="mt-1 text-xs font-bold text-slate-500">Criar dataset, incluir linhas ou atualizar por chave.</p>
-            </Link>
-            <Link to="/dashboards/new" className="rounded-[1.5rem] border border-slate-200 bg-white/90 p-5 transition hover:-translate-y-0.5 hover:border-orange-300 hover:bg-orange-50">
-              <Table2 className="text-orange-600" size={22} />
-              <p className="mt-3 font-black text-slate-950">Montar dashboard</p>
-              <p className="mt-1 text-xs font-bold text-slate-500">Use modelos prontos e edite os quadros.</p>
-            </Link>
-            <Link to="/audit" className="rounded-[1.5rem] border border-slate-200 bg-white/90 p-5 transition hover:-translate-y-0.5 hover:border-orange-300 hover:bg-orange-50">
-              <ShieldCheck className="text-orange-600" size={22} />
-              <p className="mt-3 font-black text-slate-950">Ver auditoria</p>
-              <p className="mt-1 text-xs font-bold text-slate-500">Acompanhe eventos quando seu perfil permitir.</p>
-            </Link>
+          <section className="card-premium overflow-hidden">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-5">
+              <div>
+                <p className="text-lg font-black text-slate-950">Acoes rapidas</p>
+                <p className="mt-1 text-sm font-semibold text-slate-500">Caminhos principais para continuar a operacao.</p>
+              </div>
+            </div>
+            <div className="grid gap-4 p-5 md:grid-cols-3">
+              <Link to="/datasets/upload" className="rounded-[1.5rem] border border-slate-200 bg-white/90 p-5 transition hover:-translate-y-0.5 hover:shadow-soft" style={{ ['--tw-ring-color' as any]: 'var(--easy-primary)' }}>
+                <FileSpreadsheet style={{ color: 'var(--easy-primary)' }} size={22} />
+                <p className="mt-3 font-black text-slate-950">Atualizar dados</p>
+                <p className="mt-1 text-xs font-bold text-slate-500">Criar dataset, incluir linhas ou atualizar por chave.</p>
+              </Link>
+              <Link to="/dashboards/new" className="rounded-[1.5rem] border border-slate-200 bg-white/90 p-5 transition hover:-translate-y-0.5 hover:shadow-soft">
+                <Table2 style={{ color: 'var(--easy-primary)' }} size={22} />
+                <p className="mt-3 font-black text-slate-950">Montar dashboard</p>
+                <p className="mt-1 text-xs font-bold text-slate-500">Use modelos prontos e edite os quadros.</p>
+              </Link>
+              <Link to="/audit" className="rounded-[1.5rem] border border-slate-200 bg-white/90 p-5 transition hover:-translate-y-0.5 hover:shadow-soft">
+                <ShieldCheck style={{ color: 'var(--easy-primary)' }} size={22} />
+                <p className="mt-3 font-black text-slate-950">Ver auditoria</p>
+                <p className="mt-1 text-xs font-bold text-slate-500">Acompanhe eventos quando seu perfil permitir.</p>
+              </Link>
+            </div>
           </section>
         </>
       )}

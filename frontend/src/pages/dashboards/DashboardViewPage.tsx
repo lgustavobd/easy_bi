@@ -5,11 +5,10 @@ import GridLayout, { WidthProvider } from 'react-grid-layout';
 import type { Layout } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
-import { ArrowLeft, Database, Download, Edit3, Loader2, Maximize2 } from 'lucide-react';
+import { ArrowLeft, Database, Edit3, Loader2, Maximize2, Minimize2 } from 'lucide-react';
 import { api } from '../../api/resources.api';
 import { ChartRenderer, FilterRule } from '../../components/dashboard/ChartRenderer';
-import { DashboardFilterBar } from '../../components/dashboard/DashboardFilterBar';
-import { exportWidgetAsPng } from '../../components/dashboard/export-widget';
+import { DashboardFilterDock } from '../../components/dashboard/DashboardFilterDock';
 import { useAuthStore } from '../../store/auth.store';
 
 const ResponsiveGridLayout = WidthProvider(GridLayout);
@@ -59,7 +58,7 @@ function mergeComboData(primaryData: any, secondaryData: any) {
     rowsByName.set(key, { ...current, secondaryValue: Number(row.value || 0) });
   });
 
-  return { ...primaryData, rows: Array.from(rowsByName.values()) };
+  return { ...primaryData, rows: Array.from(rowsByName.values()), secondaryFormatConfig: secondaryData?.formatConfig };
 }
 
 function normalizeWidget(widget: any, dataset: any) {
@@ -83,6 +82,10 @@ function normalizeWidget(widget: any, dataset: any) {
     valuePrefix: config.valuePrefix || config.format?.prefix || '',
     valueSuffix: config.valueSuffix || config.format?.suffix || '',
     valueDecimals: Number(config.valueDecimals ?? config.format?.decimals ?? 2),
+    secondaryValueFormat: config.secondaryValueFormat || config.secondaryFormat?.type || 'auto',
+    secondaryValuePrefix: config.secondaryValuePrefix || config.secondaryFormat?.prefix || '',
+    secondaryValueSuffix: config.secondaryValueSuffix || config.secondaryFormat?.suffix || '',
+    secondaryValueDecimals: Number(config.secondaryValueDecimals ?? config.secondaryFormat?.decimals ?? 2),
     x: Number(position.x ?? 0),
     y: Number(position.y ?? 0),
     w: Number(position.w ?? 6),
@@ -128,13 +131,9 @@ function WidgetView({ widget, dataset, filters }: { widget: any; dataset: any; f
           <p className="truncate font-black text-slate-950">{widget.title}</p>
           <p className="truncate text-[11px] font-semibold text-slate-400">{widget.aggregation} · {widget.metricColumn || 'métrica'} {widget.type !== 'KPI' && `por ${widget.dimensionColumn || 'atributo'}`}</p>
         </div>
-        <div className="flex items-center gap-2">
-          <button title="Exportar grafico" onClick={() => exportWidgetAsPng(cardRef.current, widget, dataset, filters)} className="rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-xs font-black text-slate-600 hover:border-primary hover:bg-primary-soft hover:text-primary"><Download size={14} /></button>
-          <span className="rounded-full bg-primary-soft px-2 py-1 text-[10px] font-bold text-primary">{visualType}</span>
-        </div>
       </div>
-      <div className="h-[calc(100%-62px)] p-4">
-        <ChartRenderer type={visualType} metric={widget.metricColumn} secondaryMetric={widget.secondaryMetricColumn} dimension={widget.dimensionColumn} showLegend={widget.showLegend} formatConfig={{ type: widget.valueFormat, prefix: widget.valuePrefix, suffix: widget.valueSuffix, decimals: widget.valueDecimals }} tableColumnFormats={widget.tableColumnFormats} data={data} loading={isFetching} />
+      <div className="h-[calc(100%-54px)] p-4">
+        <ChartRenderer type={visualType} metric={widget.metricColumn} secondaryMetric={widget.secondaryMetricColumn} dimension={widget.dimensionColumn} showLegend={widget.showLegend} formatConfig={{ type: widget.valueFormat, prefix: widget.valuePrefix, suffix: widget.valueSuffix, decimals: widget.valueDecimals }} secondaryFormatConfig={{ type: widget.secondaryValueFormat, prefix: widget.secondaryValuePrefix, suffix: widget.secondaryValueSuffix, decimals: widget.secondaryValueDecimals }} tableColumnFormats={widget.tableColumnFormats} data={data} loading={isFetching} />
       </div>
     </article>
   );
@@ -149,7 +148,9 @@ export function DashboardViewPage() {
   const { id = '' } = useParams();
   const user = useAuthStore(s => s.user);
   const organization = useAuthStore(s => s.organization);
+  const pageRef = useRef<HTMLDivElement | null>(null);
   const [filters, setFilters] = useState<FilterRule[]>([]);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const { data: datasets = [], isLoading: loadingDatasets } = useQuery({ queryKey: ['datasets'], queryFn: api.datasets.list });
   const { data: dashboard, isLoading: loadingDashboard } = useQuery({ queryKey: ['dashboard', id], queryFn: () => api.dashboards.get(id), enabled: Boolean(id) });
 
@@ -165,24 +166,53 @@ export function DashboardViewPage() {
     if (!savedFilters.length && dashboard?.filterConfig) setFilters([]);
   }, [dashboard?.id, dataset?.id]);
 
+  useEffect(() => {
+    function syncFullscreenState() {
+      const fullscreenElement = document.fullscreenElement || (document as any).webkitFullscreenElement;
+      setIsFullscreen(fullscreenElement === pageRef.current);
+    }
+    document.addEventListener('fullscreenchange', syncFullscreenState);
+    document.addEventListener('webkitfullscreenchange', syncFullscreenState as EventListener);
+    return () => {
+      document.removeEventListener('fullscreenchange', syncFullscreenState);
+      document.removeEventListener('webkitfullscreenchange', syncFullscreenState as EventListener);
+    };
+  }, []);
+
+  async function toggleFullscreen() {
+    const target = pageRef.current;
+    if (!target) return;
+    const fullscreenElement = document.fullscreenElement || (document as any).webkitFullscreenElement;
+    if (fullscreenElement) {
+      const exit = document.exitFullscreen || (document as any).webkitExitFullscreen;
+      await exit.call(document);
+      return;
+    }
+    const request = target.requestFullscreen || (target as any).webkitRequestFullscreen;
+    if (request) await request.call(target);
+  }
+
   if (loadingDatasets || loadingDashboard) {
     return <div className="card-premium flex items-center gap-3 p-6 text-sm font-bold text-slate-500"><Loader2 className="animate-spin" size={18} /> Carregando dashboard...</div>;
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <Link to="/dashboards" className="inline-flex items-center gap-2 text-sm font-bold text-slate-500 hover:text-primary"><ArrowLeft size={16} /> Voltar para dashboards</Link>
-          <p className="mt-4 eyebrow">Visualização</p>
-          <h2 className="page-title">{dashboard?.name || 'Dashboard'}</h2>
-          <p className="mt-2 text-sm text-slate-500">Ambiente de análise com filtros interativos. Para mover, redimensionar ou alterar métricas, acesse o editor.</p>
+    <div ref={pageRef} className={`dashboard-fullscreen-shell space-y-6 ${isFullscreen ? 'dashboard-fullscreen-active' : ''}`}>
+      <section className="dashboard-gallery-hero selection-hero selection-hero-view">
+        <div className="dashboard-gallery-hero-content">
+          <Link to="/dashboards" className="selection-hero-back"><ArrowLeft size={16} /> Voltar para dashboards</Link>
+          <p className="eyebrow text-white/80">Easy BI Workspace</p>
+          <h3>{dashboard?.name || 'Dashboard'}</h3>
+          <p>Ambiente de analise com filtros interativos. Para mover, redimensionar ou alterar metricas, acesse o editor.</p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <button className="btn-muted"><Maximize2 size={16} /> Tela cheia</button>
-          {canEditDashboard(user, organization) && <Link to={`/dashboards/${id}/edit`} className="btn-primary"><Edit3 size={16} /> Editar dashboard</Link>}
+        <div className="selection-hero-actions">
+          <button className="dashboard-gallery-new-btn selection-hero-dark-btn" onClick={toggleFullscreen}>
+            {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+            {isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'}
+          </button>
+          {canEditDashboard(user, organization) && <Link to={`/dashboards/${id}/edit`} className="dashboard-gallery-new-btn"><Edit3 size={16} /> Editar dashboard</Link>}
         </div>
-      </div>
+      </section>
 
       <section className="card-premium flex flex-wrap items-center justify-between gap-3 p-4">
         <div className="flex items-center gap-3">
@@ -195,9 +225,9 @@ export function DashboardViewPage() {
         <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-500">{Number(dataset?.rowCount || 0).toLocaleString('pt-BR')} linhas</span>
       </section>
 
-      <DashboardFilterBar dataset={dataset} filters={filters} onChange={setFilters} compact />
-
-      <section className="dashboard-canvas">
+      <div className="dashboard-workbench">
+        <div className="dashboard-workbench-main">
+          <section className="dashboard-canvas">
         {!widgets.length ? (
           <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-8 text-center text-sm font-bold text-slate-500">Esse dashboard ainda não possui gráficos salvos.</div>
         ) : (
@@ -205,7 +235,10 @@ export function DashboardViewPage() {
             {widgets.map((widget: any) => <div key={widget.id}><WidgetView widget={widget} dataset={dataset} filters={datasetFilters} /></div>)}
           </ResponsiveGridLayout>
         )}
-      </section>
+          </section>
+        </div>
+        <DashboardFilterDock dataset={dataset} filters={filters} onChange={setFilters} />
+      </div>
     </div>
   );
 }

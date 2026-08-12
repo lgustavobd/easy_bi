@@ -1,15 +1,16 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { BarChart3, Building2, Database, Home, Layers3, LogOut, Palette, ShieldCheck, UserCircle, Users } from 'lucide-react';
+import { BarChart3, Building2, CreditCard, Database, Home, Inbox, LogOut, Menu, Palette, ShieldCheck, UserCircle, Users, X } from 'lucide-react';
 import { Logo } from '../components/Logo';
 import { GLOBAL_ADMIN_ORGANIZATION, useAuthStore } from '../store/auth.store';
 
 const menu = [
   { to: '/admin-dashboard', label: 'Dash Admin', icon: BarChart3, permission: 'admin.dashboard' },
+  { to: '/requests', label: 'Solicitacoes', icon: Inbox, permission: 'admin.requests' },
   { to: '/', label: 'Visao Geral', icon: Home, permission: 'dashboard.view' },
   { to: '/dashboards', label: 'Dashboards', icon: BarChart3, permission: 'dashboard.view' },
   { to: '/datasets/upload', label: 'Datasets', icon: Database, permission: 'dataset.upload' },
-  { to: '/templates', label: 'Modelos', icon: Layers3, permission: 'dataset.upload' },
+  { to: '/plans', label: 'Planos', icon: CreditCard, permission: 'plans.view' },
   { to: '/organizations', label: 'Organizacoes', icon: Building2, permission: 'organization.manage' },
   { to: '/users', label: 'Usuarios', icon: Users, permission: 'users.manage' },
   { to: '/appearance', label: 'Aparencia', icon: Palette, permission: 'appearance.manage' },
@@ -23,10 +24,10 @@ function accentOf(organization: any) {
 
 function hasPermission(permission: string, user: any, organization: any) {
   if (!permission || permission === 'profile.view') return true;
-  if (user?.isSuperAdmin) return ['admin.dashboard', 'users.manage', 'organization.manage'].includes(permission);
+  if (user?.isSuperAdmin) return ['admin.dashboard', 'admin.requests', 'users.manage', 'organization.manage', 'plans.view'].includes(permission);
   const role = String(organization?.role || '').toUpperCase();
   if (role === 'SUPER_ADMIN') return ['users.manage', 'organization.manage'].includes(permission);
-  if (role === 'ORG_ADMIN') return ['dashboard.view', 'dashboard.create', 'dashboard.edit', 'dataset.upload', 'users.manage', 'appearance.manage', 'audit.view'].includes(permission);
+  if (role === 'ORG_ADMIN') return ['dashboard.view', 'dashboard.create', 'dashboard.edit', 'dataset.upload', 'users.manage', 'appearance.manage', 'audit.view', 'plans.view'].includes(permission);
   if (role === 'EDITOR') return ['dashboard.view', 'dashboard.create', 'dashboard.edit', 'dataset.upload'].includes(permission);
   if (role === 'READER') return ['dashboard.view'].includes(permission);
   return false;
@@ -38,10 +39,21 @@ export function AppLayout() {
   const location = useLocation();
   const accent = accentOf(organization);
   const isGlobalAdmin = Boolean(user?.isSuperAdmin);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem('easybi-sidebar-collapsed') === 'true');
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const visibleMenu = useMemo(() => menu.filter(item => hasPermission(item.permission, user, organization)), [user, organization]);
 
   useEffect(() => {
     document.documentElement.dataset.accent = accent;
   }, [accent]);
+
+  useEffect(() => {
+    window.localStorage.setItem('easybi-sidebar-collapsed', String(sidebarCollapsed));
+  }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [location.pathname]);
 
   useEffect(() => {
     if (!isGlobalAdmin) return;
@@ -50,49 +62,114 @@ export function AppLayout() {
     if (tenantDataRoute) navigate('/admin-dashboard', { replace: true });
   }, [isGlobalAdmin, location.pathname, navigate, organization?.id, setOrganization]);
 
+  function goToStart() {
+    setMobileMenuOpen(false);
+    navigate(isGlobalAdmin ? '/admin-dashboard' : '/');
+  }
+
+  function renderMenu(collapsed = false) {
+    return (
+      <nav className={`app-sidebar-nav ${collapsed ? 'is-collapsed' : ''}`}>
+        {visibleMenu.map(item => {
+          const Icon = item.icon;
+          return (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              title={collapsed ? item.label : undefined}
+              className={({ isActive }) => `app-sidebar-link ${collapsed ? 'is-collapsed' : ''} ${isActive ? 'is-active' : ''}`}
+            >
+              <span className="app-sidebar-link-icon"><Icon size={18} /></span>
+              {!collapsed && <span className="app-sidebar-link-label">{item.label}</span>}
+            </NavLink>
+          );
+        })}
+      </nav>
+    );
+  }
+
+  function renderWorkspaceCard(collapsed = false) {
+    if (collapsed) {
+      return (
+        <div className="app-account-card is-collapsed">
+          <div className="app-account-avatar">{(organization?.name || 'Global').slice(0, 2).toUpperCase()}</div>
+          <div className="app-account-separator" />
+          <div className="app-account-avatar is-user"><UserCircle size={18} /></div>
+        </div>
+      );
+    }
+    return (
+      <div className="app-account-card">
+        <div>
+          <p className="app-account-kicker">Organizacao</p>
+          <p className="app-account-title">{organization?.name || 'Administracao Global'}</p>
+          <p className="app-account-subtitle">{organization?.role || (user?.isSuperAdmin ? 'SUPER_ADMIN' : 'Sem perfil')}</p>
+        </div>
+        <div className="app-account-divider" />
+        <div>
+          <p className="app-account-kicker">Usuario</p>
+          <p className="app-account-title">{user?.name || 'Usuario'}</p>
+          <p className="app-account-subtitle break-all">{user?.email}</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen p-4 text-slate-900">
-      <div className="flex min-h-[calc(100vh-2rem)] overflow-hidden rounded-[2rem] border border-slate-200 bg-white/72 shadow-soft backdrop-blur-xl">
-        <aside className="hidden w-72 shrink-0 border-r border-slate-200 bg-white/88 p-5 lg:block">
-          <Logo />
-          <nav className="mt-8 space-y-2">
-            {menu.filter(item => hasPermission(item.permission, user, organization)).map(item => {
-              const Icon = item.icon;
-              return (
-                <NavLink key={item.to} to={item.to} className={({ isActive }) => `flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-semibold transition ${isActive ? 'bg-primary-soft text-primary shadow-sm' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-950'}`}>
-                  <Icon size={18} /> {item.label}
-                </NavLink>
-              );
-            })}
-          </nav>
-          <div className="mt-8 rounded-3xl bg-slate-950 p-5 text-white shadow-soft">
-            <p className="text-xs uppercase tracking-[0.25em] text-primary-light">Organizacao</p>
-            <p className="mt-2 font-bold">{organization?.name || 'Administracao Global'}</p>
-            <p className="mt-1 text-xs text-slate-400">{organization?.role || (user?.isSuperAdmin ? 'SUPER_ADMIN' : 'Sem perfil')}</p>
-            <div className="mt-5 border-t border-white/10 pt-4">
-              <p className="text-xs uppercase tracking-[0.25em] text-primary-light">Usuario</p>
-              <p className="mt-2 font-bold">{user?.name || 'Usuario'}</p>
-              <p className="mt-1 break-all text-xs text-slate-400">{user?.email}</p>
-            </div>
+    <div className="app-layout-page">
+      {mobileMenuOpen && <button aria-label="Fechar menu" className="app-mobile-backdrop" onClick={() => setMobileMenuOpen(false)} />}
+      <aside className={`app-sidebar app-sidebar-mobile ${mobileMenuOpen ? 'is-open' : ''}`}>
+        <div className="app-mobile-head">
+          <button type="button" onClick={goToStart} className="app-brand-button" aria-label="Ir para inicio">
+            <Logo />
+          </button>
+          <button onClick={() => setMobileMenuOpen(false)} className="app-sidebar-toggle is-mobile"><X size={18} /></button>
+        </div>
+        {renderMenu(false)}
+        {renderWorkspaceCard(false)}
+      </aside>
+
+      <div className="app-layout-frame">
+        <aside className={`app-sidebar ${sidebarCollapsed ? 'is-collapsed' : ''}`}>
+          <div className={`app-sidebar-brand ${sidebarCollapsed ? 'is-collapsed' : ''}`}>
+            <button
+              type="button"
+              onClick={() => setSidebarCollapsed(current => !current)}
+              className={`app-brand-button ${sidebarCollapsed ? 'is-collapsed' : ''}`}
+              aria-label={sidebarCollapsed ? 'Expandir menu' : 'Recolher menu'}
+              title={sidebarCollapsed ? 'Expandir menu' : 'Recolher menu'}
+            >
+              <Logo compact={sidebarCollapsed} />
+            </button>
           </div>
+          {renderMenu(sidebarCollapsed)}
+          {renderWorkspaceCard(sidebarCollapsed)}
         </aside>
-        <main className="flex min-w-0 flex-1 flex-col">
-          <header className="flex items-center justify-between border-b border-slate-200 bg-white/80 px-6 py-4 backdrop-blur-xl">
-            <div>
-              <p className="text-xs font-bold uppercase tracking-[0.25em] text-primary">Easy BI Workspace</p>
-              <h1 className="text-xl font-black text-slate-950">{organization?.name || 'Administracao global'}</h1>
-            </div>
-            <div className="flex items-center gap-3">
-              <button onClick={() => navigate('/select-organization')} className="hidden rounded-2xl border border-slate-200 bg-white px-4 py-2 text-xs font-black text-slate-600 hover:border-primary/30 hover:text-primary md:block">Trocar org</button>
-              <div className="hidden min-w-[220px] text-right md:block">
-                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-primary">Organizacao</p>
-                <p className="text-sm font-black text-slate-950">{organization?.name || 'Administracao global'}</p>
-                <p className="mt-1 text-xs font-semibold text-slate-500">{user?.name} - {user?.email}</p>
+        <main className="app-main">
+          <header className="app-header">
+            <div className="app-header-left">
+              <button onClick={() => setMobileMenuOpen(true)} className="app-mobile-menu-button" aria-label="Abrir menu"><Menu size={18} /></button>
+              <div className="app-workspace-badge">
+                <span className="app-workspace-dot" />
+                <div className="min-w-0">
+                  <p>Easy BI Workspace</p>
+                  <strong>{organization?.name || 'Administracao global'}</strong>
+                </div>
               </div>
-              <button onClick={() => { logout(); navigate('/login'); }} className="rounded-2xl border border-red-200 bg-red-50 p-3 text-red-600 hover:border-red-300 hover:bg-red-100 hover:text-red-700"><LogOut size={18} /></button>
+            </div>
+            <div className="app-header-actions">
+              <button onClick={() => navigate('/select-organization')} className="app-org-switch-button">Trocar org</button>
+              <div className="app-header-context">
+                <div className="app-context-chip is-user">
+                  <span>{organization?.role || (user?.isSuperAdmin ? 'SUPER_ADMIN' : 'Usuario')}</span>
+                  <strong>{user?.name || 'Usuario'}</strong>
+                  <small>{user?.email}</small>
+                </div>
+              </div>
+              <button onClick={() => { logout(); navigate('/login'); }} className="app-logout-button" aria-label="Sair"><LogOut size={18} /></button>
             </div>
           </header>
-          <section className="flex-1 overflow-auto p-6"><Outlet /></section>
+          <section className="app-content"><Outlet /></section>
         </main>
       </div>
     </div>
