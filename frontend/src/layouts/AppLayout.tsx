@@ -9,14 +9,14 @@ import { GLOBAL_ADMIN_ORGANIZATION, useAuthStore } from '../store/auth.store';
 
 const menu = [
   { to: '/admin-dashboard', label: 'Dash Admin', icon: BarChart3, permission: 'admin.dashboard' },
-  { to: '/requests', label: 'Solicitacoes', icon: Inbox, permission: 'admin.requests' },
-  { to: '/', label: 'Visao Geral', icon: Home, permission: 'dashboard.view' },
+  { to: '/requests', label: 'Solicitações', icon: Inbox, permission: 'admin.requests' },
+  { to: '/', label: 'Visão Geral', icon: Home, permission: 'dashboard.view' },
   { to: '/dashboards', label: 'Dashboards', icon: BarChart3, permission: 'dashboard.view' },
   { to: '/datasets/upload', label: 'Bases de dados', icon: Database, permission: 'dataset.upload' },
   { to: '/plans', label: 'Planos', icon: CreditCard, permission: 'plans.view' },
-  { to: '/organizations', label: 'Organizacoes', icon: Building2, permission: 'organization.manage' },
-  { to: '/users', label: 'Usuarios', icon: Users, permission: 'users.manage' },
-  { to: '/appearance', label: 'Aparencia', icon: Palette, permission: 'appearance.manage' },
+  { to: '/organizations', label: 'Organizações', icon: Building2, permission: 'organization.manage' },
+  { to: '/users', label: 'Usuários', icon: Users, permission: 'users.manage' },
+  { to: '/appearance', label: 'Aparência', icon: Palette, permission: 'appearance.manage' },
   { to: '/audit', label: 'Auditoria', icon: ShieldCheck, permission: 'audit.view' },
   { to: '/profile', label: 'Perfil', icon: UserCircle, permission: 'profile.view' }
 ];
@@ -117,8 +117,8 @@ export function AppLayout() {
     <div className="app-notification-popover">
       <div className="app-notification-head">
         <div>
-          <p>Notificacoes</p>
-          <small>{unreadCount ? `${unreadCount} nao lida(s)` : 'Tudo em dia por aqui'}</small>
+          <p>Notificações</p>
+          <small>{unreadCount ? `${unreadCount} não lida(s)` : 'Tudo em dia por aqui'}</small>
         </div>
         <button type="button" onClick={() => markAllAsRead.mutate()} disabled={!unreadCount || markAllAsRead.isPending}>
           <CheckCheck size={15} /> Ler tudo
@@ -140,7 +140,7 @@ export function AppLayout() {
             </span>
           </button>
         )) : (
-          <div className="app-notification-empty">Nenhuma notificacao encontrada.</div>
+          <div className="app-notification-empty">Nenhuma notificação encontrada.</div>
         )}
       </div>
     </div>
@@ -183,8 +183,8 @@ export function AppLayout() {
                   type="button"
                   className={`app-notification-button ${notificationsOpen ? 'is-open' : ''}`}
                   onClick={() => setNotificationsOpen((open) => !open)}
-                  aria-label="Notificacoes"
-                  title="Notificacoes"
+                  aria-label="Notificações"
+                  title="Notificações"
                 >
                   <Bell size={18} />
                   {unreadCount > 0 && <span className="app-notification-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>}

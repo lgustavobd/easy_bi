@@ -1,10 +1,13 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { BarChart3, CalendarDays, Edit3, Eye, LayoutDashboard, Loader2, Plus, Search, Trash2 } from 'lucide-react';
+import { BarChart3, CalendarDays, Edit3, Eye, LayoutDashboard, Loader2, Plus, Trash2 } from 'lucide-react';
 import { api } from '../../api/resources.api';
 import { useAuthStore } from '../../store/auth.store';
 import { useConfirm } from '../../components/ConfirmDialog';
+import { EmptyState } from '../../components/ui/EmptyState';
+import { PageHero } from '../../components/ui/PageHero';
+import { SearchToolbar } from '../../components/ui/SearchToolbar';
 
 function formatDate(value?: string) {
   if (!value) return 'Sem atualizacao';
@@ -103,23 +106,19 @@ export function DashboardListPage() {
     <div className="space-y-6">
       {message && <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-600 shadow-sm">{message}</div>}
 
-      <section className="dashboard-gallery-hero">
-        <div className="dashboard-gallery-hero-content">
-          <p className="eyebrow text-white/80">Easy BI Workspace</p>
-          <h3>Explore seus paineis recentes</h3>
-          <p>Encontre dashboards publicados, acompanhe quadros ativos e abra rapidamente a visualizacao ou o editor.</p>
-        </div>
-        {canEdit && <Link to="/dashboards/new" className="dashboard-gallery-new-btn"><Plus size={17} /> Novo dashboard</Link>}
-      </section>
+      <PageHero
+        title="Explore seus painéis recentes"
+        description="Encontre dashboards publicados, acompanhe quadros ativos e abra rapidamente a visualização ou o editor."
+        actions={canEdit ? <Link to="/dashboards/new" className="dashboard-gallery-new-btn"><Plus size={17} /> Novo dashboard</Link> : null}
+      />
 
-      <section className="app-search-shell">
-        <div className="app-search-icon"><Search size={22} /></div>
-        <label className="app-search-field">
-          <span className="sr-only">Pesquisar dashboards</span>
-          <input placeholder="Pesquisar dashboard por nome, descricao, setor ou status" value={dashboardFilter} onChange={(event) => setDashboardFilter(event.target.value)} />
-        </label>
-        <span className="app-search-count">{filteredDashboards.length} de {dashboards.length}</span>
-      </section>
+      <SearchToolbar
+        label="Pesquisar dashboards"
+        value={dashboardFilter}
+        onChange={setDashboardFilter}
+        placeholder="Pesquisar dashboard por nome, descrição, setor ou status"
+        count={`${filteredDashboards.length} de ${dashboards.length}`}
+      />
 
       {isLoading ? (
         <div className="card-premium flex items-center gap-3 p-6 text-sm font-bold text-slate-500"><Loader2 className="animate-spin" size={18} /> Carregando dashboards...</div>
@@ -161,12 +160,12 @@ export function DashboardListPage() {
           </div>
         </div>
       ) : (
-        <div className="card-premium p-8 text-center">
-          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-primary-soft text-primary"><LayoutDashboard size={26} /></div>
-          <h3 className="mt-4 text-xl font-black text-slate-950">{dashboards.length ? 'Nenhum dashboard encontrado' : 'Nenhum dashboard criado ainda'}</h3>
-          <p className="mt-2 text-sm font-medium text-slate-500">{dashboards.length ? 'Ajuste o filtro para encontrar outro painel.' : 'Crie o primeiro dashboard usando quadros predefinidos e dados reais importados no Easy BI.'}</p>
-          {canEdit && !dashboards.length && <Link to="/dashboards/new" className="btn-primary mt-5"><Plus size={18} /> Criar dashboard</Link>}
-        </div>
+        <EmptyState
+          icon={<LayoutDashboard size={26} />}
+          title={dashboards.length ? 'Nenhum dashboard encontrado' : 'Nenhum dashboard criado ainda'}
+          description={dashboards.length ? 'Ajuste o filtro para encontrar outro painel.' : 'Crie o primeiro dashboard usando quadros predefinidos e dados reais importados no Easy BI.'}
+          action={canEdit && !dashboards.length ? <Link to="/dashboards/new" className="btn-primary"><Plus size={18} /> Criar dashboard</Link> : null}
+        />
       )}
     </div>
   );

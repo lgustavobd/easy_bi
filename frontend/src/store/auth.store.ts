@@ -19,10 +19,20 @@ type AuthState = {
   accessToken?: string;
   refreshToken?: string;
   setSession: (payload: any) => void;
+  syncSessionProfile: (payload: any) => void;
   setOrganization: (organization: Organization) => void;
   updateCurrentOrganization: (payload: Partial<Organization>) => void;
   logout: () => void;
 };
+
+function resolveCurrentOrganization(isSuperAdmin: boolean, organizations: Organization[], current?: Organization) {
+  if (isSuperAdmin) return GLOBAL_ADMIN_ORGANIZATION;
+  if (current?.id) {
+    const freshOrganization = organizations.find((organization) => organization.id === current.id);
+    if (freshOrganization) return freshOrganization;
+  }
+  return organizations.length === 1 ? organizations[0] : undefined;
+}
 
 export const useAuthStore = create<AuthState>()(
   persist(
@@ -30,12 +40,22 @@ export const useAuthStore = create<AuthState>()(
       organizations: [],
       setSession: (payload) => {
         const isSuperAdmin = Boolean(payload.user?.isSuperAdmin);
+        const organizations = isSuperAdmin ? [] : payload.organizations || [];
         set({
           user: payload.user,
-          organizations: isSuperAdmin ? [] : payload.organizations || [],
-          organization: isSuperAdmin ? GLOBAL_ADMIN_ORGANIZATION : get().organization,
-          accessToken: payload.accessToken,
-          refreshToken: payload.refreshToken
+          organizations,
+          organization: resolveCurrentOrganization(isSuperAdmin, organizations, get().organization),
+          accessToken: payload.accessToken ?? get().accessToken,
+          refreshToken: payload.refreshToken ?? get().refreshToken
+        });
+      },
+      syncSessionProfile: (payload) => {
+        const isSuperAdmin = Boolean(payload.user?.isSuperAdmin);
+        const organizations = isSuperAdmin ? [] : payload.organizations || [];
+        set({
+          user: payload.user,
+          organizations,
+          organization: resolveCurrentOrganization(isSuperAdmin, organizations, get().organization)
         });
       },
       setOrganization: (organization) => set({ organization }),

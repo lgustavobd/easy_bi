@@ -17,6 +17,7 @@ import {
   Users
 } from 'lucide-react';
 import { api } from '../api/resources.api';
+import { PageHero } from '../components/ui/PageHero';
 
 async function safe<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
   try {
@@ -121,22 +122,22 @@ export function HomePage() {
 
   return (
     <div className="overview-page space-y-5">
-      <section className="dashboard-gallery-hero selection-hero selection-hero-overview overview-hero">
-        <div className="dashboard-gallery-hero-content overview-hero-copy">
-          <p className="eyebrow text-white/80">Easy BI Workspace</p>
-          <h3>Visao geral da operacao</h3>
-          <p>Uma leitura rapida do ambiente: dados carregados, dashboards publicados, bases saudaveis e proximas acoes.</p>
-        </div>
-        <div className="selection-hero-actions overview-hero-actions">
-          <Link to="/datasets/upload" className="dashboard-gallery-new-btn"><Database size={16} /> Bases de dados</Link>
-          <Link to="/dashboards/new" className="dashboard-gallery-new-btn"><Plus size={16} /> Novo dashboard</Link>
-        </div>
-        <div className="selection-hero-metrics overview-hero-metrics">
-          <div><p>Linhas importadas</p><strong>{formatNumber(rowCount)}</strong></div>
-          <div><p>Publicacao</p><strong>{publicationRate}%</strong></div>
-          <div><p>Saude dos dados</p><strong>{dataHealth}%</strong></div>
-        </div>
-      </section>
+      <PageHero
+        className="overview-hero"
+        title="Visão geral da operação"
+        description="Uma leitura rápida do ambiente: dados carregados, dashboards publicados, bases saudáveis e próximas ações."
+        actions={(
+          <>
+            <Link to="/datasets/upload" className="dashboard-gallery-new-btn"><Database size={16} /> Bases de dados</Link>
+            <Link to="/dashboards/new" className="dashboard-gallery-new-btn"><Plus size={16} /> Novo dashboard</Link>
+          </>
+        )}
+        metrics={[
+          { label: 'Linhas importadas', value: formatNumber(rowCount) },
+          { label: 'Publicação', value: `${publicationRate}%` },
+          { label: 'Saúde dos dados', value: `${dataHealth}%` }
+        ]}
+      />
 
       {isLoading ? (
         <div className="card-premium flex items-center gap-3 p-6 text-sm font-bold text-slate-500"><Loader2 className="animate-spin" size={18} /> Carregando resumo do banco...</div>

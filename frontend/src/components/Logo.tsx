@@ -44,8 +44,8 @@ export function Logo({ compact = false }: LogoProps) {
       )}
 
       {organizationLogo && !compact && (
-        <div className="easybi-brand-org-logo" aria-label={`Logo da organizaÃ§Ã£o ${organization?.name || ''}`}>
-          <img src={organizationLogo} alt={organization?.name ? `Logo ${organization.name}` : 'Logo da organizaÃ§Ã£o'} />
+        <div className="easybi-brand-org-logo" aria-label={`Logo da organização ${organization?.name || ''}`}>
+          <img src={organizationLogo} alt={organization?.name ? `Logo ${organization.name}` : 'Logo da organização'} />
         </div>
       )}
     </div>

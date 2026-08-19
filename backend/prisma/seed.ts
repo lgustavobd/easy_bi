@@ -78,11 +78,28 @@ async function main() {
     await prisma.permission.upsert({ where: { code }, update: {}, create: { name, code, description: name } });
   }
 
+  const essentialPlan = plans.find(plan => plan.code === 'ESSENTIAL');
+  if (essentialPlan) {
+    const [planUsingEssentialId, planUsingEssentialCode] = await Promise.all([
+      prisma.plan.findUnique({ where: { id: essentialPlan.id } }),
+      prisma.plan.findUnique({ where: { code: essentialPlan.code } })
+    ]);
+    if (planUsingEssentialId && planUsingEssentialId.code !== essentialPlan.code && !planUsingEssentialCode) {
+      await prisma.plan.update({ where: { id: essentialPlan.id }, data: { code: essentialPlan.code } });
+    }
+  }
+
   for (const plan of plans) {
     const { id, code, ...data } = plan;
     await prisma.plan.upsert({ where: { code }, update: data, create: { id, code, ...data } });
   }
-  await prisma.plan.updateMany({ where: { code: { in: ['STARTER', 'PRO', 'BUSINESS', 'ENTERPRISE', 'CORPORATE'] } }, data: { isActive: false, isDefault: false } });
+  await prisma.plan.updateMany({
+    where: {
+      code: { in: ['STARTER', 'PRO', 'BUSINESS', 'ENTERPRISE', 'CORPORATE'] },
+      id: { not: '00000000-0000-0000-0000-000000000104' }
+    },
+    data: { isActive: false, isDefault: false }
+  });
 
   const superRole = await prisma.role.upsert({ where: { code: 'SUPER_ADMIN' }, update: {}, create: { name: 'Super Admin', code: 'SUPER_ADMIN', description: 'Administrador global do SaaS' } });
   const orgAdminRole = await prisma.role.upsert({ where: { code: 'ORG_ADMIN' }, update: {}, create: { name: 'Admin da Organização', code: 'ORG_ADMIN', description: 'Administrador da organização' } });

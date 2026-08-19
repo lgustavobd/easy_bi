@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import { useAuthStore } from './store/auth.store';
+import { me } from './api/auth.api';
 import { AppLayout } from './layouts/AppLayout';
 import { LoginPage } from './pages/auth/LoginPage';
 import { SelectOrganizationPage } from './pages/organizations/SelectOrganizationPage';
@@ -25,6 +26,7 @@ const ACTIVITY_EVENTS = ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchst
 function Protected({ children }: { children: JSX.Element }) {
   const token = useAuthStore(s => s.accessToken);
   const logout = useAuthStore(s => s.logout);
+  const syncSessionProfile = useAuthStore(s => s.syncSessionProfile);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -52,6 +54,29 @@ function Protected({ children }: { children: JSX.Element }) {
       document.removeEventListener('visibilitychange', resetTimer);
     };
   }, [token, logout, navigate]);
+
+  useEffect(() => {
+    if (!token) return;
+
+    let cancelled = false;
+    async function syncProfile() {
+      try {
+        const profile = await me();
+        if (!cancelled) syncSessionProfile(profile);
+      } catch (error: any) {
+        const status = error?.response?.status;
+        if (!cancelled && (status === 401 || status === 403)) {
+          logout();
+          navigate('/login', { replace: true });
+        }
+      }
+    }
+
+    syncProfile();
+    return () => {
+      cancelled = true;
+    };
+  }, [token, syncSessionProfile, logout, navigate]);
 
   if (!token) return <Navigate to="/login" replace />;
   return children;
