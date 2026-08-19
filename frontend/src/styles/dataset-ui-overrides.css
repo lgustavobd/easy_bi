@@ -84,6 +84,11 @@
   --dataset-action-color: #b45309;
 }
 
+.dataset-list-actions .dataset-action-reload-model {
+  --dataset-action-rgb: 124 58 237;
+  --dataset-action-color: #6d28d9;
+}
+
 .dataset-list-actions .dataset-action-delete {
   --dataset-action-rgb: 220 38 38;
   --dataset-action-color: #dc2626;

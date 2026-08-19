@@ -96,7 +96,7 @@ function SectorSelector({
       <p className="mt-3 text-xs font-semibold text-slate-500">
         {allAccess
           ? 'Admin da Organizacao recebe automaticamente acesso a todos os setores ativos.'
-          : 'Todo usuario precisa ter pelo menos um setor. Ele podera ver dashboards, datasets e modelos dos setores selecionados.'}
+          : 'Todo usuario precisa ter pelo menos um setor. Ele podera ver dashboards, bases de dados e modelos dos setores selecionados.'}
       </p>
     </div>
   );

@@ -282,7 +282,7 @@
 
 .metrics-config-table {
   --metrics-compact-field-height: 1.75rem;
-  --metrics-compact-field-width: 5.5rem;
+  --metrics-compact-field-width: 5.65rem;
 
   width: max-content;
   min-width: 100%;
@@ -324,8 +324,8 @@
 
 .metrics-config-table thead th:nth-child(3),
 .metrics-config-table tbody td:nth-child(3) {
-  width: 92px;
-  min-width: 92px;
+  width: 108px;
+  min-width: 108px;
 }
 
 .metrics-config-table thead th:nth-child(4),
@@ -395,12 +395,12 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 4.5rem;
+  width: 5.2rem;
   min-height: 1.45rem;
   border: 1px solid transparent;
   border-radius: 999px;
-  padding: .2rem .55rem;
-  font-size: .64rem;
+  padding: .2rem .42rem;
+  font-size: .62rem;
   font-weight: 950;
   white-space: nowrap;
 }

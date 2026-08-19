@@ -6,8 +6,15 @@ import { useAuthStore } from '../../store/auth.store';
 import { useConfirm } from '../../components/ConfirmDialog';
 
 function money(plan: any) {
+  if (plan?.priceLabel && Number(plan?.monthlyPrice || 0) === 0) return plan.priceLabel;
   if (plan?.monthlyPrice === null || plan?.monthlyPrice === undefined) return plan?.priceLabel || 'Sob consulta';
   return Number(plan.monthlyPrice).toLocaleString('pt-BR', { style: 'currency', currency: plan.currency || 'BRL' });
+}
+
+function priceCaption(plan: any) {
+  if (plan?.requiresDedicatedInfra) return 'com Admin Master';
+  if (plan?.trialDays) return `${plan.trialDays} dias de teste`;
+  return 'por mes';
 }
 
 function limit(value: any, label: string) {
@@ -27,12 +34,14 @@ function canViewPlans(user: any, organization: any) {
 function featureList(plan: any) {
   const features = plan?.features || {};
   return [
-    features.canExportCharts && 'Exportacao de graficos',
+    features.canExportCharts && 'Exportacao de graficos e dashboards',
     features.canUseCalculatedMetrics && 'Metricas calculadas',
     features.canUseAppendRows && 'Inclusao de novas linhas',
     features.canUsePatchRows && 'Atualizacao por linhas especificas',
     features.canUseCustomLogo && 'Logo personalizado',
-    features.canCreateSectors && 'Setores adicionais'
+    features.canCreateSectors && 'Setores adicionais',
+    features.canUseDatabaseConnections && 'Conexao com bancos de dados',
+    plan?.requiresDedicatedInfra && 'Infraestrutura apartada'
   ].filter(Boolean);
 }
 
@@ -158,14 +167,20 @@ export function PlansPage() {
               <div className="mt-5 rounded-[1.65rem] border border-orange-200 bg-gradient-to-br from-orange-50 via-amber-50 to-white p-4 shadow-[0_18px_42px_rgba(249,115,22,0.16)]">
                 <p className="text-xs font-black uppercase tracking-[0.16em] text-orange-500">Valor mensal</p>
                 <p className="mt-1 break-words text-[clamp(2rem,4vw,2.5rem)] font-black tracking-[-0.05em] text-orange-600 drop-shadow-sm">{money(plan)}</p>
-                <p className="mt-1 text-xs font-bold uppercase tracking-[0.16em] text-slate-400">por mes</p>
+                <p className="mt-1 text-xs font-bold uppercase tracking-[0.16em] text-slate-400">{priceCaption(plan)}</p>
               </div>
               <div className="mt-5 space-y-2 text-sm font-bold text-slate-600">
                 <p>{limit(plan.limits?.maxUsers, 'usuarios')}</p>
-                <p>{limit(plan.limits?.maxDatasets, 'datasets')}</p>
+                <p>{limit(plan.limits?.maxDatasets, 'bases de dados')}</p>
                 <p>{limit(plan.limits?.maxDashboards, 'dashboards')}</p>
-                <p>{limit(plan.limits?.maxRowsPerDataset, 'linhas por dataset')}</p>
+                <p>{limit(plan.limits?.maxTotalRows, 'linhas totais')}</p>
+                {plan.trialDays ? <p>{plan.trialDays} dias de acesso para teste</p> : null}
               </div>
+              {plan.requiresDedicatedInfra && (
+                <p className="mt-4 rounded-3xl border border-cyan-100 bg-cyan-50 p-4 text-sm font-bold text-cyan-800">
+                  O Corporate libera conexoes com bancos de dados e opera em infraestrutura apartada dos planos Free e Starter. A liberacao e o valor devem ser combinados com o Admin Master.
+                </p>
+              )}
               <div className="mt-5 flex-1 space-y-2">
                 {featureList(plan).map((feature: any) => (
                   <p key={feature} className="flex items-center gap-2 text-sm font-bold text-slate-700"><CheckCircle2 size={16} className="text-primary" /> {feature}</p>
@@ -193,7 +208,7 @@ export function PlansPage() {
           ) : (
             <div className="mt-5 grid gap-4 lg:grid-cols-[260px_1fr_190px]">
               <select className="input" value={requestedPlanId} onChange={event => setRequestedPlanId(event.target.value)}>
-                {availableTargets.map((plan: any) => <option key={plan.id} value={plan.id}>{plan.name} - {money(plan)}/mes</option>)}
+                {availableTargets.map((plan: any) => <option key={plan.id} value={plan.id}>{plan.name} - {money(plan)}</option>)}
               </select>
               <input className="input" value={reason} onChange={event => setReason(event.target.value)} placeholder="Motivo opcional para a troca de plano" />
               <button className="btn-primary" onClick={requestPlanChange} disabled={!requestedPlanId || planDoesNotFit || loadingImpact}><Send size={16} /> Solicitar</button>

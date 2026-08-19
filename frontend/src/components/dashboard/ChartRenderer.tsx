@@ -268,18 +268,14 @@ export function ChartRenderer({ type, metric, secondaryMetric, dimension, showLe
     .filter((row) => Number.isFinite(row.value));
 
   if (!data || (!rows.length && type !== 'KPI')) {
-    return <EmptyState message={emptyMessage || 'Selecione dataset, métrica e atributo para montar a visualização.'} />;
+    return <EmptyState message={emptyMessage || 'Selecione base de dados, métrica e atributo para montar a visualização.'} />;
   }
 
   if (type === 'KPI') {
     return (
-      <div className="flex h-full flex-col justify-center">
+      <div className="flex h-full flex-col items-center justify-center text-center">
         <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">{metricLabel}</p>
         <p className="mt-2 text-4xl font-black tracking-tight text-slate-950">{formatValue(metric, total, valueFormatConfig)}</p>
-        <div className="mt-4 flex flex-wrap items-center gap-2">
-          <span className="rounded-full bg-primary-soft px-2.5 py-1 text-xs font-black text-primary">{(data?.totalRows || 0).toLocaleString('pt-BR')} linhas</span>
-          <span className="text-xs font-semibold text-slate-400">calculado no banco da organização</span>
-        </div>
       </div>
     );
   }

@@ -133,6 +133,7 @@ export class AuthService {
         slug: membership.organization.slug,
         role: membership.role.code,
         themeConfig: membership.organization.themeConfig,
+        accessExpiresAt: membership.organization.accessExpiresAt,
         plan: this.serializePlan(membership.organization.plan),
         sectors: sectorsByOrg.get(membership.organization.id) || []
       }));
@@ -183,11 +184,18 @@ export class AuthService {
       id: plan.id,
       code: plan.code,
       name: plan.name,
+      description: plan.description,
+      priceLabel: plan.priceLabel,
+      monthlyPrice: plan.monthlyPrice === null || plan.monthlyPrice === undefined ? null : Number(plan.monthlyPrice),
+      currency: plan.currency || 'BRL',
+      trialDays: plan.trialDays,
+      requiresDedicatedInfra: plan.requiresDedicatedInfra,
       limits: {
         maxUsers: plan.maxUsers,
         maxDatasets: plan.maxDatasets,
         maxDashboards: plan.maxDashboards,
-        maxRowsPerDataset: plan.maxRowsPerDataset
+        maxRowsPerDataset: plan.maxRowsPerDataset,
+        maxTotalRows: plan.maxTotalRows
       },
       features: {
         canExportCharts: plan.canExportCharts,
@@ -195,7 +203,8 @@ export class AuthService {
         canUsePatchRows: plan.canUsePatchRows,
         canUseAppendRows: plan.canUseAppendRows,
         canUseCustomLogo: plan.canUseCustomLogo,
-        canCreateSectors: plan.canCreateSectors
+        canCreateSectors: plan.canCreateSectors,
+        canUseDatabaseConnections: plan.canUseDatabaseConnections
       }
     };
   }

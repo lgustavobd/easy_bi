@@ -6,6 +6,7 @@ import { useAuthStore } from '../../store/auth.store';
 import { useConfirm } from '../../components/ConfirmDialog';
 
 function money(plan: any) {
+  if (plan?.priceLabel && Number(plan?.monthlyPrice || 0) === 0) return plan.priceLabel;
   if (plan?.monthlyPrice === null || plan?.monthlyPrice === undefined) return plan?.priceLabel || 'Sob consulta';
   return Number(plan.monthlyPrice).toLocaleString('pt-BR', { style: 'currency', currency: plan.currency || 'BRL' });
 }
@@ -90,6 +91,7 @@ export function AdminRequestsPage() {
         status,
         adminNotes: form.adminNotes,
         planId: form.planId || request.requestedPlan?.id || plans[0]?.id,
+        trialDays: form.trialDays,
         organizationName: form.organizationName || request.companyName,
         document: form.document || request.document,
         userName: form.userName || request.requesterName,
@@ -177,6 +179,7 @@ export function AdminRequestsPage() {
         <div className="divide-y divide-slate-100">
           {filteredAccess.map((request: any) => {
             const form = accessForms[request.id] || {};
+            const approvalPlan = plans.find((plan: any) => plan.id === (form.planId || request.requestedPlan?.id)) || request.requestedPlan;
             return (
               <article key={request.id} className="grid gap-5 p-5 xl:grid-cols-[1fr_1.35fr]">
                 <div>
@@ -199,7 +202,7 @@ export function AdminRequestsPage() {
                     <Info size={14} /> Ver mensagem
                   </button>
                   <p className="mt-3 text-xs font-black uppercase tracking-[0.18em] text-slate-400">Plano solicitado</p>
-                  <p className="mt-1 font-black text-primary">{request.requestedPlan?.name || '-'} - {money(request.requestedPlan)}/mes</p>
+                  <p className="mt-1 font-black text-primary">{request.requestedPlan?.name || '-'} - {money(request.requestedPlan)}</p>
                 </div>
                 <div className="grid gap-3 md:grid-cols-2">
                   {request.status === 'PENDING' ? (
@@ -209,8 +212,11 @@ export function AdminRequestsPage() {
                       <input className="input" value={form.userName ?? request.requesterName} onChange={event => patchAccess(request.id, { userName: event.target.value })} placeholder="Nome do admin" />
                       <input className="input" value={form.userEmail ?? request.requesterEmail} onChange={event => patchAccess(request.id, { userEmail: event.target.value })} placeholder="E-mail do admin" />
                       <select className="input" value={form.planId || request.requestedPlan?.id || plans[0]?.id || ''} onChange={event => patchAccess(request.id, { planId: event.target.value })}>
-                        {plans.map((plan: any) => <option key={plan.id} value={plan.id}>{plan.name} - {money(plan)}/mes</option>)}
+                        {plans.map((plan: any) => <option key={plan.id} value={plan.id}>{plan.name} - {money(plan)}</option>)}
                       </select>
+                      {approvalPlan?.trialDays ? (
+                        <input className="input" type="number" min={1} value={form.trialDays ?? approvalPlan.trialDays} onChange={event => patchAccess(request.id, { trialDays: event.target.value })} placeholder="Dias de teste" />
+                      ) : null}
                       <input className="input" type="password" value={form.password ?? ''} onChange={event => patchAccess(request.id, { password: event.target.value })} placeholder="Senha inicial (min. 8)" />
                       <input className="input md:col-span-2" value={form.adminNotes || ''} onChange={event => patchAccess(request.id, { adminNotes: event.target.value })} placeholder="Observacao interna opcional" />
                       <div className="flex gap-2 md:col-span-2">
@@ -271,8 +277,8 @@ export function AdminRequestsPage() {
                         <Info size={14} /> Motivo
                       </button>
                     </td>
-                    <td className="px-5 py-4 font-bold text-slate-600">{request.currentPlan?.name || '-'}<p className="text-xs text-slate-400">{money(request.currentPlan)}/mes</p></td>
-                    <td className="px-5 py-4 font-bold text-primary">{request.requestedPlan?.name || '-'}<p className="text-xs text-slate-400">{money(request.requestedPlan)}/mes</p></td>
+                    <td className="px-5 py-4 font-bold text-slate-600">{request.currentPlan?.name || '-'}<p className="text-xs text-slate-400">{money(request.currentPlan)}</p></td>
+                    <td className="px-5 py-4 font-bold text-primary">{request.requestedPlan?.name || '-'}<p className="text-xs text-slate-400">{money(request.requestedPlan)}</p></td>
                     <td className="px-5 py-4 text-slate-600">{request.requestedBy?.name}<p className="text-xs text-slate-400">{request.requestedBy?.email}</p></td>
                     <td className="px-5 py-4"><span className={`rounded-full px-3 py-1 text-xs font-black ${statusClass(request.status)}`}>{request.status}</span></td>
                     <td className="px-5 py-4">

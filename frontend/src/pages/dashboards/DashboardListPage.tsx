@@ -16,6 +16,45 @@ function canEditDashboard(user: any, organization: any) {
   return Boolean(user?.isSuperAdmin || role === 'SUPER_ADMIN' || role === 'ORG_ADMIN' || role === 'EDITOR');
 }
 
+function dashboardPreviewClass(widget: any) {
+  const visual = String(widget?.config?.visualType || widget?.type || '').toUpperCase();
+  if (visual.includes('KPI')) return 'is-kpi';
+  if (visual.includes('LINE') || visual.includes('AREA') || visual.includes('COMBO')) return 'is-line';
+  if (visual.includes('DONUT') || visual.includes('PIE') || visual.includes('RADAR')) return 'is-donut';
+  if (visual.includes('TABLE')) return 'is-table';
+  return 'is-bar';
+}
+
+function DashboardCardPreview({ dashboard }: { dashboard: any }) {
+  const widgets = Array.isArray(dashboard?.widgets) ? dashboard.widgets : [];
+
+  if (!widgets.length) {
+    return (
+      <>
+        <div className="dashboard-card-orb">
+          <BarChart3 size={42} />
+        </div>
+        <span className="dashboard-card-mini-icon"><LayoutDashboard size={15} /></span>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <div className="dashboard-card-snapshot" aria-hidden="true">
+        {widgets.slice(0, 6).map((widget: any, index: number) => (
+          <span key={widget.id || index} className={`dashboard-snapshot-tile ${dashboardPreviewClass(widget)}`}>
+            <i />
+            <i />
+            <i />
+          </span>
+        ))}
+      </div>
+      <span className="dashboard-card-mini-icon"><LayoutDashboard size={15} /></span>
+    </>
+  );
+}
+
 export function DashboardListPage() {
   const user = useAuthStore(s => s.user);
   const organization = useAuthStore(s => s.organization);
@@ -93,12 +132,9 @@ export function DashboardListPage() {
           <div className="dashboard-list-shell">
           {filteredDashboards.map((dashboard: any) => (
             <article key={dashboard.id} className="dashboard-list-row">
-              <div className="dashboard-card-preview">
-                <div className="dashboard-card-orb">
-                  <BarChart3 size={42} />
-                </div>
-                <span className="dashboard-card-mini-icon"><LayoutDashboard size={15} /></span>
-              </div>
+              <Link to={`/dashboards/${dashboard.id}/view`} className="dashboard-card-preview dashboard-card-preview-link" aria-label={`Abrir dashboard ${dashboard.name}`}>
+                <DashboardCardPreview dashboard={dashboard} />
+              </Link>
               <div className="dashboard-list-main">
                 <div className="dashboard-list-icon"><LayoutDashboard size={20} /></div>
                 <div className="min-w-0">

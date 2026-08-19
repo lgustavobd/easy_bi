@@ -356,7 +356,7 @@ function TemplatePreviewModal({
               <div className="min-w-0">
                 <p className="text-xs font-black uppercase tracking-[0.22em] text-primary">Lupa do modelo</p>
                 <h3 className="truncate text-2xl font-black text-slate-950">{template.name}</h3>
-                <p className="mt-1 text-sm font-semibold text-slate-500">Confira mapeamento, metricas e datasets associados antes de reaproveitar a carga.</p>
+                <p className="mt-1 text-sm font-semibold text-slate-500">Confira mapeamento, metricas e bases associadas antes de reaproveitar a carga.</p>
               </div>
             </div>
             <button type="button" onClick={onClose} className="modal-close-btn" aria-label="Fechar modelo"><X size={18} /></button>
@@ -368,7 +368,7 @@ function TemplatePreviewModal({
             <div className="flex flex-wrap gap-2">
               <div className="org-context-badge"><Building2 size={16} /><span>Organizacao</span><strong>{template.organization?.name || organization?.name || 'Organizacao atual'}</strong></div>
               <div className="org-context-badge"><Layers3 size={16} /><span>Setor</span><strong>{template.sector?.name || 'Sem setor'}</strong></div>
-              <div className="org-context-badge"><Database size={16} /><span>Datasets</span><strong>{relatedDatasets.length}</strong></div>
+              <div className="org-context-badge"><Database size={16} /><span>Bases</span><strong>{relatedDatasets.length}</strong></div>
             </div>
             <label className="min-w-[260px] max-w-xl flex-1">
               <span className="form-label">Pesquisar no modelo</span>
@@ -404,7 +404,7 @@ function TemplatePreviewModal({
           </div>
 
           <section className="builder-modal-section">
-            <p className="font-black text-slate-950">Datasets vinculados</p>
+            <p className="font-black text-slate-950">Bases vinculadas</p>
             <div className="mt-3 grid gap-3 md:grid-cols-2">
               {relatedDatasets.length ? relatedDatasets.map((dataset: any) => (
                 <div key={dataset.id} className="rounded-2xl border border-slate-200 bg-white p-4">
@@ -415,7 +415,7 @@ function TemplatePreviewModal({
                     Ver dados
                   </button>
                 </div>
-              )) : <p className="text-sm font-bold text-slate-400">Nenhum dataset vinculado ainda.</p>}
+              )) : <p className="text-sm font-bold text-slate-400">Nenhuma base vinculada ainda.</p>}
             </div>
           </section>
 
@@ -508,13 +508,13 @@ function DatasetPreviewModal({ dataset, onClose }: { dataset: any; onClose: () =
   }
 
   return createPortal(
-    <div className="data-preview-backdrop" role="dialog" aria-modal="true" aria-label="Visualizar dados do dataset">
+    <div className="data-preview-backdrop" role="dialog" aria-modal="true" aria-label="Visualizar dados da base">
       <div className="data-preview-panel">
         <header className="data-preview-header">
           <div className="flex min-w-0 items-start gap-3">
             <div className="rounded-2xl bg-primary p-3 text-white shadow-glow"><Table2 size={20} /></div>
             <div className="min-w-0">
-              <p className="eyebrow text-xs">Lupa do dataset</p>
+              <p className="eyebrow text-xs">Lupa da base</p>
               <h3 className="truncate text-2xl font-black text-slate-950">{dataset?.name}</h3>
               <p className="mt-1 text-xs font-bold text-slate-500">Veja os dados importados, filtre por coluna e confira o conteudo ligado a este modelo.</p>
             </div>
@@ -948,7 +948,7 @@ export function TemplateMetricsModal({
     }
 
     const confirmed = await confirm({
-      title: 'Salvar colunas do dataset?',
+      title: 'Salvar colunas da base?',
       description: `Confirma salvar as metricas, dimensoes, formatos e colunas calculadas do modelo "${template.name}"?`,
       details: [
         `${selectedMetrics.length} coluna(s) como metrica.`,
@@ -1053,7 +1053,7 @@ export function TemplateMetricsModal({
               <div className="min-w-0">
                 <p className="text-xs font-black uppercase tracking-[0.22em] text-primary">Modelos flexiveis</p>
                 <h3 className="truncate text-2xl font-black text-slate-950">Ajustar metricas de {template.name}</h3>
-                <p className="mt-1 text-sm font-semibold text-slate-500">Essa edicao atualiza somente o modelo. O dataset e os dashboards atuais nao sao alterados.</p>
+                <p className="mt-1 text-sm font-semibold text-slate-500">Essa edicao atualiza somente o modelo. A base de dados e os dashboards atuais nao sao alterados.</p>
               </div>
             </div>
             <button type="button" onClick={onClose} className="modal-close-btn" aria-label="Fechar ajuste de metricas"><X size={18} /></button>
@@ -1072,22 +1072,22 @@ export function TemplateMetricsModal({
               <div className="metrics-context-details">
                 <div className="metrics-dataset-chip">
                   <Database size={16} />
-                  <span>Dataset</span>
+                  <span>Base</span>
                   <strong>{selectedDataset?.name || template.name}</strong>
                 </div>
                 <label className="hidden">
-                  <span className="form-label">Filtrar datasets</span>
+                  <span className="form-label">Filtrar bases</span>
                   <div className="app-search-field app-search-field-compact mt-1">
                     <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
                     <input className="form-input pl-10" value={datasetSearch} onChange={(event) => setDatasetSearch(event.target.value)} placeholder="Nome, setor ou linhas..." />
                   </div>
-                  <p className="mt-1 text-[11px] font-bold text-slate-400">{filteredDatasetOptions.length} de {datasetOptions.length} datasets</p>
+                  <p className="mt-1 text-[11px] font-bold text-slate-400">{filteredDatasetOptions.length} de {datasetOptions.length} bases</p>
                 </label>
 
                 <label className="hidden">
-                  <span className="form-label">Dataset base</span>
+                  <span className="form-label">Base de dados</span>
                   <select className="form-select mt-1" value={selectedDatasetId} onChange={(event) => setSelectedDatasetId(event.target.value)}>
-                    {!datasetOptionsForSelect.length && <option value="">Nenhum dataset encontrado</option>}
+                    {!datasetOptionsForSelect.length && <option value="">Nenhuma base encontrada</option>}
                     {datasetOptionsForSelect.map((dataset: any) => (
                       <option key={dataset.id} value={dataset.id}>{dataset.name} · {datasetSummary(dataset)}</option>
                     ))}
@@ -1100,7 +1100,7 @@ export function TemplateMetricsModal({
                 </label>
 
                 <label className="metrics-field-search hidden">
-                  <span className="form-label">Buscar campo no dataset</span>
+                  <span className="form-label">Buscar campo na base</span>
                   <div className="app-search-field app-search-field-compact mt-1">
                     <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
                     <input className="form-input pl-10" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Ex.: valor, margem, ticket..." />
@@ -1115,7 +1115,7 @@ export function TemplateMetricsModal({
                 <div>
                   <p className="font-black">Coluna calculada real</p>
                   <p className="mt-1">
-                    A formula e aplicada nas linhas do dataset ligado ao modelo. Depois disso a coluna aparece como metrica para usar no dashboard.
+                    A formula e aplicada nas linhas da base ligada ao modelo. Depois disso a coluna aparece como metrica para usar no dashboard.
                   </p>
                 </div>
               </div>
@@ -1124,7 +1124,7 @@ export function TemplateMetricsModal({
 
           <div className="metrics-search-row">
             <label>
-              <span className="form-label metrics-strong-label">Buscar campo no dataset</span>
+              <span className="form-label metrics-strong-label">Buscar campo na base</span>
               <div className="app-search-field app-search-field-compact mt-1">
                 <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
                 <input className="form-input pl-10" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Ex.: valor, margem, ticket..." />
@@ -1290,7 +1290,7 @@ export function TemplateMetricsModal({
                   })}
 
                   {!fieldRows.length && (
-                    <tr><td colSpan={6} className="metrics-empty-cell">{isFetching ? 'Carregando colunas do dataset...' : 'Nenhum campo encontrado para esse filtro.'}</td></tr>
+                    <tr><td colSpan={6} className="metrics-empty-cell">{isFetching ? 'Carregando colunas da base...' : 'Nenhum campo encontrado para esse filtro.'}</td></tr>
                   )}
                 </tbody>
               </table>
@@ -1341,7 +1341,7 @@ export function TemplateMetricsModal({
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <p className="font-black text-slate-950">Metricas atualmente salvas</p>
-                <p className="mt-1 text-sm font-semibold text-slate-500">Crie, renomeie ou remova metricas sem alterar o dataset nem dashboards atuais.</p>
+                <p className="mt-1 text-sm font-semibold text-slate-500">Crie, renomeie ou remova metricas sem alterar a base nem dashboards atuais.</p>
               </div>
               {selectedDataset && <span className="rounded-full bg-primary-soft px-4 py-2 text-xs font-black text-primary">{selectedDataset.name}</span>}
             </div>
@@ -1385,7 +1385,7 @@ export function TemplateMetricsModal({
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
                           <p className="truncate text-sm font-black text-slate-950">{displayName}</p>
-                          <p className="mt-1 text-[11px] font-bold uppercase tracking-wider text-slate-400">{calculatedMetric ? 'Coluna calculada' : column ? 'Campo do dataset' : 'Precisa de formula'}</p>
+                          <p className="mt-1 text-[11px] font-bold uppercase tracking-wider text-slate-400">{calculatedMetric ? 'Coluna calculada' : column ? 'Campo da base' : 'Precisa de formula'}</p>
                           {calculatedMetric && <p className="mt-2 line-clamp-2 text-xs font-semibold text-emerald-800">{calculatedMetric.formula}</p>}
                         </div>
                         <div className="flex shrink-0 items-center gap-2">
@@ -1405,7 +1405,7 @@ export function TemplateMetricsModal({
           <section className="builder-modal-section hidden">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <p className="font-black text-slate-950">Campos disponiveis no dataset</p>
+                <p className="font-black text-slate-950">Campos disponiveis na base</p>
                 <p className="mt-1 text-sm font-semibold text-slate-500">Adicione uma metrica direta ou use campos na formula da coluna calculada.</p>
               </div>
               {datasetDetails && (
@@ -1454,7 +1454,7 @@ export function TemplateMetricsModal({
 
               {!filteredColumns.length && (
                 <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-sm font-bold text-slate-400 md:col-span-2">
-                  {isFetching ? 'Carregando colunas do dataset...' : 'Nenhum campo encontrado para esse filtro.'}
+                  {isFetching ? 'Carregando colunas da base...' : 'Nenhum campo encontrado para esse filtro.'}
                 </div>
               )}
             </div>
@@ -1555,7 +1555,7 @@ export function TemplatesPage() {
         <div className="dashboard-gallery-hero-content">
           <p className="eyebrow text-white/80">Easy BI Workspace</p>
           <h3>Reutilize modelos com seguranca</h3>
-          <p>Abra a lupa, confira datasets vinculados e evolua colunas do modelo sem interferir nos dashboards ja publicados.</p>
+          <p>Abra a lupa, confira bases vinculadas e evolua colunas do modelo sem interferir nos dashboards ja publicados.</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <span className="selection-hero-pill"><Building2 size={15} /> {organization?.name || 'Global SaaS'}</span>
@@ -1573,7 +1573,7 @@ export function TemplatesPage() {
             <span className="sr-only">Buscar modelos</span>
             <div className="app-search-field">
               <Search className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-              <input className="form-input pl-11" value={templateSearch} onChange={(event) => setTemplateSearch(event.target.value)} placeholder="Buscar por modelo, dataset, metrica, setor..." />
+              <input className="form-input pl-11" value={templateSearch} onChange={(event) => setTemplateSearch(event.target.value)} placeholder="Buscar por modelo, base, metrica, setor..." />
             </div>
           </label>
           {templateSearch && <button type="button" onClick={() => setTemplateSearch('')} className="btn-muted px-3 py-2 text-xs"><X size={14} /> Limpar</button>}
@@ -1612,7 +1612,7 @@ export function TemplatesPage() {
 
               <div className="template-card-datasets">
                 <div className="mb-2 flex items-center justify-between gap-3">
-                  <p className="text-xs font-black uppercase tracking-wider text-slate-400">Datasets vinculados</p>
+                  <p className="text-xs font-black uppercase tracking-wider text-slate-400">Bases vinculadas</p>
                   <span className="rounded-full bg-primary-soft px-2 py-1 text-[10px] font-black text-primary">{linkedDatasets.length}</span>
                 </div>
                 <div className="template-linked-datasets">
@@ -1621,14 +1621,14 @@ export function TemplatesPage() {
                       <Database size={13} />
                       <span>{dataset.name}</span>
                     </button>
-                  )) : <span className="text-xs font-bold text-slate-400">Nenhum dataset vinculado.</span>}
+                  )) : <span className="text-xs font-bold text-slate-400">Nenhuma base vinculada.</span>}
                   {linkedDatasets.length > 8 && <span className="text-xs font-black text-slate-400">+{linkedDatasets.length - 8} outros</span>}
                 </div>
               </div>
 
               <div className="template-card-side">
                 <div className="template-card-stats">
-                  <span className="rounded-full bg-slate-100 px-3 py-1">{linkedDatasets.length} datasets vinculados</span>
+                  <span className="rounded-full bg-slate-100 px-3 py-1">{linkedDatasets.length} bases vinculadas</span>
                   <span className="rounded-full bg-slate-100 px-3 py-1">{metrics.length} metricas</span>
                   <span className="rounded-full bg-slate-100 px-3 py-1">{dimensions.length} dimensoes</span>
                 </div>

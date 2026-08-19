@@ -34,6 +34,20 @@ function templateForDataset(dataset: any, templates: any[]) {
   ));
 }
 
+function isJoinModelDataset(dataset: any) {
+  const metadata = dataset?.metadata && typeof dataset.metadata === 'object' ? dataset.metadata : {};
+  return metadata.kind === 'JOIN_MODEL' || metadata.source === 'join_model';
+}
+
+function joinModelSourceNames(dataset: any) {
+  const metadata = dataset?.metadata && typeof dataset.metadata === 'object' ? dataset.metadata : {};
+  const joinConfig = metadata.joinConfig && typeof metadata.joinConfig === 'object' ? metadata.joinConfig : {};
+  return {
+    primary: joinConfig.primaryDatasetName || 'base principal',
+    secondary: joinConfig.secondaryDatasetName || 'base relacionada'
+  };
+}
+
 function summarizeList(values: string[], fallback = '-') {
   if (!values.length) return fallback;
   const visible = values.slice(0, 4).join(', ');
@@ -139,13 +153,13 @@ function DatasetPreviewModal({ dataset, onClose }: { dataset: any; onClose: () =
 
   return createPortal(
 
-    <div className="data-preview-backdrop" role="dialog" aria-modal="true" aria-label="Visualizar dados do dataset">
+    <div className="data-preview-backdrop" role="dialog" aria-modal="true" aria-label="Visualizar dados da base">
       <div className="data-preview-panel">
         <header className="data-preview-header">
           <div className="flex min-w-0 items-start gap-3">
             <div className="rounded-2xl bg-primary p-3 text-white shadow-glow"><Table2 size={20} /></div>
             <div className="min-w-0">
-              <p className="eyebrow text-xs">Lupa do dataset</p>
+              <p className="eyebrow text-xs">Lupa da base</p>
               <h3 className="truncate text-2xl font-black text-slate-950">{dataset?.name}</h3>
               <p className="mt-1 text-xs font-bold text-slate-500">Veja os dados importados, filtre por coluna e confira se o arquivo está correto antes de montar dashboards.</p>
             </div>
@@ -205,13 +219,259 @@ function DatasetPreviewModal({ dataset, onClose }: { dataset: any; onClose: () =
   , document.body);
 }
 
+function joinFieldKey(source: 'primary' | 'secondary', columnName: string) {
+  return `${source}:${columnName}`;
+}
+
+function DatasetJoinModelModal({
+  datasets,
+  organization,
+  onClose,
+  onCreated,
+  confirm
+}: {
+  datasets: any[];
+  organization: any;
+  onClose: () => void;
+  onCreated: (dataset: any) => Promise<void>;
+  confirm: ReturnType<typeof useConfirm>;
+}) {
+  const availableDatasets = useMemo(() => datasets.filter((dataset: any) => Array.isArray(dataset?.columns) && dataset.columns.length), [datasets]);
+  const [name, setName] = useState('');
+  const [primaryDatasetId, setPrimaryDatasetId] = useState(availableDatasets[0]?.id || '');
+  const [secondaryDatasetId, setSecondaryDatasetId] = useState(availableDatasets.find((dataset: any) => dataset.id !== availableDatasets[0]?.id)?.id || '');
+  const [primaryKey, setPrimaryKey] = useState('');
+  const [secondaryKey, setSecondaryKey] = useState('');
+  const [joinType, setJoinType] = useState<'LEFT' | 'INNER'>('LEFT');
+  const [selectedColumns, setSelectedColumns] = useState<Set<string>>(new Set());
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const primaryDataset = availableDatasets.find((dataset: any) => dataset.id === primaryDatasetId);
+  const secondaryDataset = availableDatasets.find((dataset: any) => dataset.id === secondaryDatasetId);
+  const primaryColumns = primaryDataset?.columns || [];
+  const secondaryColumns = secondaryDataset?.columns || [];
+  const selectedCount = selectedColumns.size;
+
+  useEffect(() => {
+    if (!primaryDatasetId && availableDatasets[0]?.id) setPrimaryDatasetId(availableDatasets[0].id);
+  }, [availableDatasets, primaryDatasetId]);
+
+  useEffect(() => {
+    const fallback = availableDatasets.find((dataset: any) => dataset.id !== primaryDatasetId);
+    if ((!secondaryDatasetId || secondaryDatasetId === primaryDatasetId) && fallback?.id) setSecondaryDatasetId(fallback.id);
+  }, [availableDatasets, primaryDatasetId, secondaryDatasetId]);
+
+  useEffect(() => {
+    if (!primaryColumns.length) {
+      setPrimaryKey('');
+      return;
+    }
+    if (!primaryColumns.some((column: any) => column.name === primaryKey)) setPrimaryKey(primaryColumns[0].name);
+  }, [primaryColumns, primaryKey]);
+
+  useEffect(() => {
+    if (!secondaryColumns.length) {
+      setSecondaryKey('');
+      return;
+    }
+    if (!secondaryColumns.some((column: any) => column.name === secondaryKey)) setSecondaryKey(secondaryColumns[0].name);
+  }, [secondaryColumns, secondaryKey]);
+
+  useEffect(() => {
+    const next = new Set<string>();
+    primaryColumns.forEach((column: any) => next.add(joinFieldKey('primary', column.name)));
+    secondaryColumns.forEach((column: any) => next.add(joinFieldKey('secondary', column.name)));
+    setSelectedColumns(next);
+    if (!name.trim() && primaryDataset?.name && secondaryDataset?.name) {
+      setName(`${primaryDataset.name} + ${secondaryDataset.name}`);
+    }
+  }, [primaryDatasetId, secondaryDatasetId]);
+
+  function toggleColumn(source: 'primary' | 'secondary', columnName: string) {
+    setSelectedColumns((current) => {
+      const next = new Set(current);
+      const key = joinFieldKey(source, columnName);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  async function createJoinModel() {
+    if (!primaryDataset || !secondaryDataset || !primaryKey || !secondaryKey || !selectedCount) return;
+    const normalizedName = normalizeName(name);
+    if (!normalizedName) {
+      setError('Informe o nome da base combinada.');
+      return;
+    }
+
+    const confirmed = await confirm({
+      title: 'Criar base combinada por join?',
+      description: `Vamos criar uma nova base chamada "${normalizedName}" combinando "${primaryDataset.name}" com "${secondaryDataset.name}".`,
+      details: [
+        `Chave principal: ${primaryKey}`,
+        `Chave relacionada: ${secondaryKey}`,
+        `Campos selecionados: ${selectedCount}`
+      ],
+      confirmLabel: 'Sim, criar base',
+      tone: 'success'
+    });
+    if (!confirmed) return;
+
+    setLoading(true);
+    setError('');
+    try {
+      const selectedPayload = Array.from(selectedColumns).map((key) => {
+        const [source, ...rest] = key.split(':');
+        return { source, column: rest.join(':') };
+      });
+      const response = await api.datasets.createJoinModel({
+        name: normalizedName,
+        primaryDatasetId: primaryDataset.id,
+        secondaryDatasetId: secondaryDataset.id,
+        primaryKey,
+        secondaryKey,
+        joinType,
+        selectedColumns: selectedPayload
+      });
+      await onCreated(response);
+      await confirm({
+        title: 'Base combinada criada',
+        description: `A base "${response?.name || normalizedName}" foi criada com ${Number(response?.rowCount || 0).toLocaleString('pt-BR')} linha(s) e ja pode ser usada nos dashboards.`,
+        confirmLabel: 'OK',
+        hideCancel: true,
+        tone: 'success'
+      });
+      onClose();
+    } catch (err: any) {
+      setError(err?.response?.data?.message || 'Nao foi possivel criar a base combinada.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const renderColumnList = (source: 'primary' | 'secondary', columns: any[]) => (
+    <div className="join-column-list">
+      {columns.map((column: any) => {
+        const key = joinFieldKey(source, column.name);
+        const checked = selectedColumns.has(key);
+        return (
+          <label key={key} className={`join-column-row ${checked ? 'join-column-row-active' : ''}`}>
+            <input type="checkbox" checked={checked} onChange={() => toggleColumn(source, column.name)} />
+            <span className="min-w-0 flex-1">
+              <strong>{column.originalName || column.name}</strong>
+              <small>{column.name}</small>
+            </span>
+            <em>{columnTypeLabel(column)}</em>
+          </label>
+        );
+      })}
+    </div>
+  );
+
+  return createPortal(
+    <div className="data-preview-backdrop" role="dialog" aria-modal="true" aria-label="Criar base combinada por join">
+      <div className="join-model-panel">
+        <header className="join-model-header">
+          <div className="flex min-w-0 items-start gap-3">
+            <div className="rounded-2xl bg-primary p-3 text-white shadow-glow"><Sparkles size={20} /></div>
+            <div className="min-w-0">
+              <p className="eyebrow text-primary">Modelo por join</p>
+              <h3>Criar base combinada</h3>
+              <p>Una duas bases por uma coluna-chave e salve o resultado como uma nova base para usar nos dashboards.</p>
+            </div>
+          </div>
+          <button type="button" onClick={onClose} className="modal-close-btn" aria-label="Fechar join"><X size={18} /></button>
+        </header>
+
+        <div className="join-model-body">
+          {error && <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-black text-red-700">{error}</div>}
+          {availableDatasets.length < 2 ? (
+            <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm font-bold text-slate-500">
+              Crie pelo menos duas bases com colunas para montar um modelo por join.
+            </div>
+          ) : (
+            <>
+              <section className="join-model-grid">
+                <div className="join-model-card">
+                  <span>Base principal</span>
+                  <select className="input" value={primaryDatasetId} onChange={(event) => setPrimaryDatasetId(event.target.value)}>
+                    {availableDatasets.map((dataset: any) => <option key={dataset.id} value={dataset.id}>{dataset.name}</option>)}
+                  </select>
+                  <label>
+                    <small>Coluna-chave</small>
+                    <select className="input" value={primaryKey} onChange={(event) => setPrimaryKey(event.target.value)}>
+                      {primaryColumns.map((column: any) => <option key={column.id || column.name} value={column.name}>{column.originalName || column.name}</option>)}
+                    </select>
+                  </label>
+                </div>
+                <div className="join-model-card">
+                  <span>Base relacionada</span>
+                  <select className="input" value={secondaryDatasetId} onChange={(event) => setSecondaryDatasetId(event.target.value)}>
+                    {availableDatasets.filter((dataset: any) => dataset.id !== primaryDatasetId).map((dataset: any) => <option key={dataset.id} value={dataset.id}>{dataset.name}</option>)}
+                  </select>
+                  <label>
+                    <small>Coluna-chave</small>
+                    <select className="input" value={secondaryKey} onChange={(event) => setSecondaryKey(event.target.value)}>
+                      {secondaryColumns.map((column: any) => <option key={column.id || column.name} value={column.name}>{column.originalName || column.name}</option>)}
+                    </select>
+                  </label>
+                </div>
+                <div className="join-model-card">
+                  <span>Resultado</span>
+                  <input className="input" value={name} onChange={(event) => setName(event.target.value)} placeholder="Nome da nova base" />
+                  <label>
+                    <small>Tipo de ligação</small>
+                    <select className="input" value={joinType} onChange={(event) => setJoinType(event.target.value as 'LEFT' | 'INNER')}>
+                      <option value="LEFT">Manter todos da base principal</option>
+                      <option value="INNER">Somente registros encontrados nas duas</option>
+                    </select>
+                  </label>
+                </div>
+              </section>
+
+              <section className="join-columns-shell">
+                <div className="join-columns-title">
+                  <div>
+                    <p className="eyebrow text-primary">Campos do modelo</p>
+                    <h4>Escolha o que entra na nova base</h4>
+                  </div>
+                  <span>{selectedCount} campo(s)</span>
+                </div>
+                <div className="join-columns-grid">
+                  <div>
+                    <h5>{primaryDataset?.name || 'Base principal'}</h5>
+                    {renderColumnList('primary', primaryColumns)}
+                  </div>
+                  <div>
+                    <h5>{secondaryDataset?.name || 'Base relacionada'}</h5>
+                    {renderColumnList('secondary', secondaryColumns)}
+                  </div>
+                </div>
+              </section>
+            </>
+          )}
+        </div>
+
+        <footer className="join-model-footer">
+          <button type="button" onClick={onClose} className="btn-muted">Cancelar</button>
+          <button type="button" onClick={createJoinModel} disabled={loading || availableDatasets.length < 2 || !primaryDataset || !secondaryDataset || !primaryKey || !secondaryKey || !selectedCount} className="btn-primary disabled:opacity-50">
+            <Wand2 size={17} /> {loading ? 'Criando...' : 'Criar base combinada'}
+          </button>
+        </footer>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 export function DatasetUploadPage() {
   const user = useAuthStore(s => s.user);
   const organization = useAuthStore(s => s.organization);
   const confirm = useConfirm();
   const allowed = canManageDataset(user, organization);
   const canAppendRows = planFeature(organization, 'canUseAppendRows');
-  const canPatchRows = planFeature(organization, 'canUsePatchRows');
   const canUseCalculatedMetrics = planFeature(organization, 'canUseCalculatedMetrics');
   const [screen, setScreen] = useState<DatasetScreen>('list');
   const [tab, setTab] = useState<DatasetTab>('new');
@@ -235,6 +495,7 @@ export function DatasetUploadPage() {
   const [patchSheetName, setPatchSheetName] = useState('');
   const [sheetLoading, setSheetLoading] = useState<DatasetTab | ''>('');
   const [previewDataset, setPreviewDataset] = useState<any>(null);
+  const [joinModelOpen, setJoinModelOpen] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<any>(null);
   const [metricsLoadingId, setMetricsLoadingId] = useState('');
   const [result, setResult] = useState<any>(null);
@@ -253,7 +514,8 @@ export function DatasetUploadPage() {
     () => datasets.find((dataset: any) => normalizeName(dataset.name).toLowerCase() === normalizedDatasetName.toLowerCase()),
     [datasets, normalizedDatasetName]
   );
-  const selectedReplaceDataset = datasets.find((dataset: any) => dataset.id === replaceDatasetId);
+  const updateableDatasets = useMemo(() => datasets.filter((dataset: any) => !isJoinModelDataset(dataset)), [datasets]);
+  const selectedReplaceDataset = updateableDatasets.find((dataset: any) => dataset.id === replaceDatasetId);
   const filteredDatasets = useMemo(() => {
     const term = normalizeSearch(datasetSearch);
     if (!term) return datasets;
@@ -349,36 +611,39 @@ export function DatasetUploadPage() {
     });
   }
 
+  function nextUpdateableDatasetId(dataset?: any) {
+    if (dataset?.id && !isJoinModelDataset(dataset)) return dataset.id;
+    if (existingDataset?.id && !isJoinModelDataset(existingDataset)) return existingDataset.id;
+    if (replaceDatasetId && updateableDatasets.some((item: any) => item.id === replaceDatasetId)) return replaceDatasetId;
+    return updateableDatasets[0]?.id || '';
+  }
+
   function switchToUpdate(dataset?: any) {
     setScreen('load');
     setTab('update');
     setError('');
     setMessage('');
-    setReplaceDatasetId(dataset?.id || existingDataset?.id || replaceDatasetId || datasets[0]?.id || '');
+    setReplaceDatasetId(nextUpdateableDatasetId(dataset));
   }
 
   function switchToAppend(dataset?: any) {
     if (!canAppendRows) {
-      setError(planBlockedMessage(organization, 'incluir novas linhas em datasets'));
+      setError(planBlockedMessage(organization, 'incluir novas linhas em bases de dados'));
       return;
     }
     setScreen('load');
     setTab('append');
     setError('');
     setMessage('');
-    setReplaceDatasetId(dataset?.id || existingDataset?.id || replaceDatasetId || datasets[0]?.id || '');
+    setReplaceDatasetId(nextUpdateableDatasetId(dataset));
   }
 
   function switchToPatch(dataset?: any) {
-    if (!canPatchRows) {
-      setError(planBlockedMessage(organization, 'atualizar linhas especificas'));
-      return;
-    }
     setScreen('load');
     setTab('patch');
     setError('');
     setMessage('');
-    setReplaceDatasetId(dataset?.id || existingDataset?.id || replaceDatasetId || datasets[0]?.id || '');
+    setReplaceDatasetId(nextUpdateableDatasetId(dataset));
   }
 
   function openDatasetPreview(dataset: any) {
@@ -406,17 +671,72 @@ export function DatasetUploadPage() {
           : [dataset, ...(template.datasets || [])]
       }));
     } catch (err: any) {
-      setError(err?.response?.data?.message || 'Nao foi possivel abrir as metricas deste dataset.');
+      setError(err?.response?.data?.message || 'Nao foi possivel abrir as colunas desta base de dados.');
     } finally {
       setMetricsLoadingId('');
+    }
+  }
+
+  function openJoinModel() {
+    if (datasets.length < 2) {
+      setError('Para criar um modelo por join, cadastre pelo menos duas bases de dados.');
+      setMessage('');
+      return;
+    }
+    setError('');
+    setMessage('');
+    openAfterViewportTop(() => setJoinModelOpen(true));
+  }
+
+  async function handleJoinModelCreated(dataset: any) {
+    setResult(dataset);
+    setMessage(`Base combinada "${dataset?.name || 'modelo por join'}" criada com sucesso e pronta para dashboards.`);
+    await refetch();
+  }
+
+  async function reloadJoinModel(dataset: any) {
+    const sourceNames = joinModelSourceNames(dataset);
+    const confirmed = await confirm({
+      title: 'Recarregar modelo por join?',
+      description: `Antes de recarregar "${dataset?.name || 'modelo por join'}", confirme se as bases "${sourceNames.primary}" e "${sourceNames.secondary}" ja foram atualizadas.`,
+      details: [
+        'O Easy BI vai refazer o merge usando as mesmas chaves e campos escolhidos.',
+        'O ID da base combinada sera mantido, entao dashboards conectados continuam funcionando.'
+      ],
+      confirmLabel: 'Sim, recarregar modelo',
+      cancelLabel: 'Cancelar',
+      tone: 'warning'
+    });
+    if (!confirmed) return;
+
+    setLoading(true);
+    setError('');
+    setMessage('');
+    try {
+      const response = await api.datasets.reloadJoinModel(dataset.id);
+      setResult(response);
+      setMessage(`Modelo por join "${response?.name || dataset?.name || 'selecionado'}" recarregado com sucesso.`);
+      await refetch();
+      await refetchTemplates();
+      await confirm({
+        title: 'Modelo recarregado',
+        description: `O modelo "${response?.name || dataset?.name || 'selecionado'}" foi reconstruido com os dados atuais das bases de origem.`,
+        confirmLabel: 'OK',
+        hideCancel: true,
+        tone: 'success'
+      });
+    } catch (err: any) {
+      setError(err?.response?.data?.message || 'Nao foi possivel recarregar o modelo por join.');
+    } finally {
+      setLoading(false);
     }
   }
 
   async function submit() {
     if (!file || nameExists) return;
     const confirmed = await confirm({
-      title: 'Importar novo dataset?',
-      description: `O arquivo "${file.name}" sera analisado e salvo como dataset "${normalizedDatasetName || file.name.replace(/\.[^.]+$/, '')}".`,
+      title: 'Importar nova base de dados?',
+      description: `O arquivo "${file.name}" sera analisado e salvo como base de dados "${normalizedDatasetName || file.name.replace(/\.[^.]+$/, '')}".`,
       details: [
         saveTemplate ? 'Um modelo reutilizavel sera salvo junto com esta carga.' : 'Nenhum modelo reutilizavel sera salvo nesta carga.',
         newSheetName ? `Aba selecionada: ${newSheetName}` : 'Arquivo sem aba especifica selecionada.'
@@ -436,7 +756,7 @@ export function DatasetUploadPage() {
       if (newSheetName) form.append('sheetName', newSheetName);
       const response = await api.datasets.upload(form);
       setResult(response);
-      setMessage('Dataset importado com sucesso. As colunas foram analisadas e salvas no banco.');
+      setMessage('Base de dados importada com sucesso. As colunas foram analisadas e salvas no banco.');
       setFile(null);
       setDatasetName('');
       setNewSheets([]);
@@ -444,8 +764,8 @@ export function DatasetUploadPage() {
       await refetch();
       await refetchTemplates();
       await confirm({
-        title: 'Dataset importado',
-        description: `O dataset "${normalizedDatasetName || response?.name || file.name}" foi importado e analisado com sucesso.`,
+        title: 'Base de dados importada',
+        description: `A base "${normalizedDatasetName || response?.name || file.name}" foi importada e analisada com sucesso.`,
         confirmLabel: 'OK',
         hideCancel: true,
         tone: 'success'
@@ -464,25 +784,25 @@ export function DatasetUploadPage() {
 
   async function removeDataset(id: string, name: string) {
     const confirmed = await confirm({
-      title: 'Excluir dataset?',
-      description: `Tem certeza que deseja excluir o dataset "${name}"? Os dashboards que usam esse dataset podem ficar sem dados.`,
+      title: 'Excluir base de dados?',
+      description: `Tem certeza que deseja excluir a base "${name}"? Os dashboards que usam essa base podem ficar sem dados.`,
       confirmLabel: 'Sim, excluir',
       tone: 'danger'
     });
     if (!confirmed) return;
     try {
       await api.datasets.remove(id);
-      setMessage('Dataset excluído com sucesso.');
+      setMessage('Base de dados excluida com sucesso.');
       if (replaceDatasetId === id) setReplaceDatasetId('');
       await refetch();
       await confirm({
-        title: 'Dataset excluido',
-        description: `O dataset "${name}" foi excluido com sucesso.`,
+        title: 'Base de dados excluida',
+        description: `A base "${name}" foi excluida com sucesso.`,
         confirmLabel: 'OK',
         hideCancel: true,
         tone: 'success'
       });
-    } catch (err: any) { setError(err?.response?.data?.message || 'Não foi possível excluir o dataset.'); }
+    } catch (err: any) { setError(err?.response?.data?.message || 'Nao foi possivel excluir a base de dados.'); }
   }
 
   async function downloadTemplate(id: string, name: string) {
@@ -495,10 +815,10 @@ export function DatasetUploadPage() {
   async function replaceDataset() {
     if (!replaceDatasetId || !replaceFile) return;
     const confirmed = await confirm({
-      title: 'Atualizar dataset existente?',
-      description: `O dataset "${selectedReplaceDataset?.name || 'selecionado'}" sera substituido pelo arquivo "${replaceFile.name}". Os dashboards conectados passam a usar os novos dados.`,
+      title: 'Atualizar base existente?',
+      description: `A base "${selectedReplaceDataset?.name || 'selecionada'}" sera substituida pelo arquivo "${replaceFile.name}". Os dashboards conectados passam a usar os novos dados.`,
       details: [
-        'Essa opcao mantem o ID do dataset.',
+        'Essa opcao mantem o ID da base.',
         replaceSheetName ? `Aba selecionada: ${replaceSheetName}` : 'Arquivo sem aba especifica selecionada.'
       ],
       confirmLabel: 'Sim, atualizar',
@@ -512,14 +832,14 @@ export function DatasetUploadPage() {
       if (replaceSheetName) form.append('sheetName', replaceSheetName);
       const response = await api.datasets.replaceFile(replaceDatasetId, form);
       setResult(response);
-      setMessage('Dataset atualizado com sucesso. Os dashboards conectados passam a usar os novos dados.');
+      setMessage('Base de dados atualizada com sucesso. Os dashboards conectados passam a usar os novos dados.');
       setReplaceFile(null);
       setReplaceSheets([]);
       setReplaceSheetName('');
       await refetch();
       await confirm({
-        title: 'Dataset atualizado',
-        description: `O dataset "${selectedReplaceDataset?.name || 'selecionado'}" foi atualizado com sucesso.`,
+        title: 'Base de dados atualizada',
+        description: `A base "${selectedReplaceDataset?.name || 'selecionada'}" foi atualizada com sucesso.`,
         confirmLabel: 'OK',
         hideCancel: true,
         tone: 'success'
@@ -532,19 +852,19 @@ export function DatasetUploadPage() {
         setError(sheetPayload.message || 'Escolha qual aba do Excel deseja usar.');
         return;
       }
-      setError(err?.response?.data?.message || 'Não foi possível atualizar o dataset.');
+      setError(err?.response?.data?.message || 'Nao foi possivel atualizar a base de dados.');
     }
     finally { setLoading(false); }
   }
 
   async function appendDatasetRows() {
     if (!replaceDatasetId || !appendFile) return;
-    if (!canAppendRows) { setError(planBlockedMessage(organization, 'incluir novas linhas em datasets')); return; }
+    if (!canAppendRows) { setError(planBlockedMessage(organization, 'incluir novas linhas em bases de dados')); return; }
     const confirmed = await confirm({
       title: 'Incluir novas linhas?',
-      description: `As linhas do arquivo "${appendFile.name}" serao adicionadas ao final do dataset "${selectedReplaceDataset?.name || 'selecionado'}", sem apagar o que ja existe.`,
+      description: `As linhas do arquivo "${appendFile.name}" serao adicionadas ao final da base "${selectedReplaceDataset?.name || 'selecionada'}", sem apagar o que ja existe.`,
       details: [
-        'O arquivo precisa seguir as colunas do dataset.',
+        'O arquivo precisa seguir as colunas da base.',
         appendSheetName ? `Aba selecionada: ${appendSheetName}` : 'Arquivo sem aba especifica selecionada.'
       ],
       confirmLabel: 'Sim, incluir',
@@ -566,7 +886,7 @@ export function DatasetUploadPage() {
       await refetch();
       await confirm({
         title: 'Linhas incluidas',
-        description: `Inclusao concluida no dataset "${selectedReplaceDataset?.name || 'selecionado'}".`,
+        description: `Inclusao concluida na base "${selectedReplaceDataset?.name || 'selecionada'}".`,
         confirmLabel: 'OK',
         hideCancel: true,
         tone: 'success'
@@ -579,16 +899,15 @@ export function DatasetUploadPage() {
         setError(sheetPayload.message || 'Escolha qual aba do Excel deseja usar.');
         return;
       }
-      setError(err?.response?.data?.message || 'Nao foi possivel incluir novas linhas no dataset.');
+      setError(err?.response?.data?.message || 'Nao foi possivel incluir novas linhas na base.');
     } finally { setLoading(false); }
   }
 
   async function patchDatasetRows() {
     if (!replaceDatasetId || !patchFile || !patchMatchColumn) return;
-    if (!canPatchRows) { setError(planBlockedMessage(organization, 'atualizar linhas especificas')); return; }
     const confirmed = await confirm({
       title: 'Atualizar linhas especificas?',
-      description: `O arquivo "${patchFile.name}" atualizara somente registros encontrados no dataset "${selectedReplaceDataset?.name || 'selecionado'}".`,
+      description: `O arquivo "${patchFile.name}" atualizara somente registros encontrados na base "${selectedReplaceDataset?.name || 'selecionada'}".`,
       details: [
         `Coluna-chave: ${patchMatchColumn}`,
         patchSheetName ? `Aba selecionada: ${patchSheetName}` : 'Arquivo sem aba especifica selecionada.'
@@ -614,7 +933,7 @@ export function DatasetUploadPage() {
       await refetch();
       await confirm({
         title: 'Linhas atualizadas',
-        description: `Atualizacao por chave concluida no dataset "${selectedReplaceDataset?.name || 'selecionado'}".`,
+        description: `Atualizacao por chave concluida na base "${selectedReplaceDataset?.name || 'selecionada'}".`,
         confirmLabel: 'OK',
         hideCancel: true,
         tone: 'success'
@@ -634,8 +953,8 @@ export function DatasetUploadPage() {
   if (!allowed) {
     return (
       <div className="card-premium p-8 text-center">
-        <h2 className="text-2xl font-black text-slate-950">Sem permissão para datasets</h2>
-        <p className="mt-2 text-sm font-semibold text-slate-500">Seu perfil permite visualizar dashboards, mas não criar, excluir ou atualizar datasets.</p>
+        <h2 className="text-2xl font-black text-slate-950">Sem permissao para bases de dados</h2>
+        <p className="mt-2 text-sm font-semibold text-slate-500">Seu perfil permite visualizar dashboards, mas nao criar, excluir ou atualizar bases de dados.</p>
       </div>
     );
   }
@@ -646,20 +965,20 @@ export function DatasetUploadPage() {
         <div className="dashboard-gallery-hero-content">
           <p className="eyebrow text-white/80">Easy BI Workspace</p>
           <h3>Organize suas bases de dados</h3>
-          <p>Crie datasets novos, atualize arquivos existentes e confira os dados importados antes de construir dashboards.</p>
+          <p>Crie bases novas, atualize arquivos existentes e confira os dados importados antes de construir dashboards.</p>
         </div>
         <div className="selection-hero-actions">
           <span className="selection-hero-pill"><Building2 size={15} /> {organization?.name || 'Global SaaS'}</span>
-          <span className="selection-hero-pill"><Database size={15} /> {datasets.length} datasets</span>
+          <span className="selection-hero-pill"><Database size={15} /> {datasets.length} bases</span>
         </div>
       </section>
 
-      <section className="grid gap-3 md:grid-cols-3">
+      <section className="grid gap-3 md:grid-cols-4">
         <button type="button" onClick={() => setScreen('list')} className={`rounded-[1.5rem] border p-5 text-left transition ${screen === 'list' ? 'border-primary bg-primary-soft shadow-sm' : 'border-slate-200 bg-white hover:border-primary/40 hover:bg-primary-soft/40'}`}>
           <div className="flex items-center gap-3">
             <div className={`rounded-2xl p-3 ${screen === 'list' ? 'bg-primary text-white' : 'bg-slate-100 text-slate-600'}`}><Database size={20} /></div>
             <div>
-              <p className="font-black text-slate-950">Ver datasets</p>
+              <p className="font-black text-slate-950">Ver bases</p>
               <p className="mt-1 text-xs font-bold text-slate-500">Listagem, busca, lupa, modelo e ações rápidas.</p>
             </div>
           </div>
@@ -668,7 +987,7 @@ export function DatasetUploadPage() {
           <div className="flex items-center gap-3">
             <div className={`rounded-2xl p-3 ${screen === 'new' ? 'bg-primary text-white' : 'bg-slate-100 text-slate-600'}`}><UploadCloud size={20} /></div>
             <div>
-              <p className="font-black text-slate-950">Novo dataset</p>
+              <p className="font-black text-slate-950">Nova base</p>
               <p className="mt-1 text-xs font-bold text-slate-500">Crie uma base nova para dashboards.</p>
             </div>
           </div>
@@ -682,13 +1001,22 @@ export function DatasetUploadPage() {
             </div>
           </div>
         </button>
+        <button type="button" onClick={openJoinModel} className={`rounded-[1.5rem] border p-5 text-left transition ${joinModelOpen ? 'border-primary bg-primary-soft shadow-sm' : 'border-slate-200 bg-white hover:border-primary/40 hover:bg-primary-soft/40'}`}>
+          <div className="flex items-center gap-3">
+            <div className={`rounded-2xl p-3 ${joinModelOpen ? 'bg-primary text-white' : 'bg-slate-100 text-slate-600'}`}><Sparkles size={20} /></div>
+            <div>
+              <p className="font-black text-slate-950">Modelo por join</p>
+              <p className="mt-1 text-xs font-bold text-slate-500">Una duas bases e crie uma nova base para dashboards.</p>
+            </div>
+          </div>
+        </button>
       </section>
 
       {(message || error || nameExists) && (
         <div className={`rounded-2xl border px-4 py-3 text-sm font-bold ${error || nameExists ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
           {error || (nameExists ? (
             <span>
-              Já existe um dataset chamado <strong>{existingDataset?.name}</strong> nesta organização. Use a aba <button type="button" className="underline" onClick={() => switchToUpdate(existingDataset)}>Atualizar existente</button> ou escolha outro nome.
+              Ja existe uma base de dados chamada <strong>{existingDataset?.name}</strong> nesta organizacao. Use a aba <button type="button" className="underline" onClick={() => switchToUpdate(existingDataset)}>Atualizar existente</button> ou escolha outro nome.
             </span>
           ) : message)}
         </div>
@@ -697,20 +1025,23 @@ export function DatasetUploadPage() {
       {screen === 'list' && <section className="dataset-imported-panel min-w-0 space-y-4">
         <div className="card-premium min-w-0 p-5">
           <div className="dataset-list-header">
-            <div className="flex items-center gap-3"><h3 className="text-sm font-black uppercase tracking-[0.15em] text-slate-500">Datasets importados</h3><span className="rounded-full bg-primary-soft px-3 py-1 text-xs font-black text-primary">{filteredDatasets.length}/{datasets.length}</span></div>
+            <div className="flex items-center gap-3"><h3 className="text-sm font-black uppercase tracking-[0.15em] text-slate-500">Bases importadas</h3><span className="rounded-full bg-primary-soft px-3 py-1 text-xs font-black text-primary">{filteredDatasets.length}/{datasets.length}</span></div>
             <label className="app-search-field app-search-field-compact dataset-list-search">
               <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-              <input value={datasetSearch} onChange={(event) => setDatasetSearch(event.target.value)} placeholder="Pesquisar dataset, setor ou status..." />
+              <input value={datasetSearch} onChange={(event) => setDatasetSearch(event.target.value)} placeholder="Pesquisar base, setor ou status..." />
               {datasetSearch && <button type="button" onClick={() => setDatasetSearch('')} aria-label="Limpar busca"><X size={14} /></button>}
             </label>
           </div>
           <div className="dataset-list-scroll mt-4">
-            {!datasets.length && <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5 text-sm font-bold text-slate-500">Nenhum dataset nesta organizacao.</div>}
-            {Boolean(datasets.length && !filteredDatasets.length) && <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5 text-sm font-bold text-slate-500">Nenhum dataset encontrado para esse filtro.</div>}
+            {!datasets.length && <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5 text-sm font-bold text-slate-500">Nenhuma base de dados nesta organizacao.</div>}
+            {Boolean(datasets.length && !filteredDatasets.length) && <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5 text-sm font-bold text-slate-500">Nenhuma base de dados encontrada para esse filtro.</div>}
             {filteredDatasets.map((dataset: any) => {
               const linkedTemplate = templateForDataset(dataset, templates);
               const templateMetrics = asList(linkedTemplate?.metrics);
               const templateDimensions = asList(linkedTemplate?.dimensions);
+              const datasetMetrics = (dataset.columns || []).filter((column: any) => column.isMetric).map((column: any) => column.name);
+              const datasetDimensions = (dataset.columns || []).filter((column: any) => column.isDimension).map((column: any) => column.name);
+              const isJoinModel = isJoinModelDataset(dataset);
               return (
               <div key={dataset.id} className="dataset-list-card dataset-list-card-readable">
                 <div className="dataset-card-head">
@@ -728,18 +1059,24 @@ export function DatasetUploadPage() {
                   </div>
                 </div>
                 <div className="dataset-template-summary">
-                  <div><span>Modelo</span><strong>{linkedTemplate?.name || 'Criar ao abrir metricas'}</strong></div>
-                  <div><span>Metricas</span><strong>{summarizeCount(templateMetrics, 'metrica', 'metricas')}</strong></div>
-                  <div><span>Dimensoes</span><strong>{summarizeCount(templateDimensions, 'dimensao', 'dimensoes')}</strong></div>
+                  <div><span>Modelo</span><strong>{isJoinModel ? 'Modelo por join' : linkedTemplate?.name || 'Criar ao abrir metricas'}</strong></div>
+                  <div><span>Metricas</span><strong>{summarizeCount(templateMetrics.length ? templateMetrics : datasetMetrics, 'metrica', 'metricas')}</strong></div>
+                  <div><span>Dimensoes</span><strong>{summarizeCount(templateDimensions.length ? templateDimensions : datasetDimensions, 'dimensao', 'dimensoes')}</strong></div>
                 </div>
                 <div className="dataset-list-actions">
-                  <button onClick={() => openDatasetPreview(dataset)} className="btn-muted dataset-action-btn dataset-action-preview min-w-0 px-3 py-2 text-xs"><Eye size={14} /> Lupa</button>
-                  <button disabled={!canUseCalculatedMetrics || metricsLoadingId === dataset.id} onClick={() => openDatasetMetrics(dataset)} className="btn-primary dataset-action-btn dataset-action-metrics min-w-0 px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40"><Sparkles size={14} /> {metricsLoadingId === dataset.id ? 'Abrindo...' : 'Colunas'}</button>
-                  <button onClick={() => downloadTemplate(dataset.id, dataset.name)} className="btn-muted dataset-action-btn dataset-action-model min-w-0 px-3 py-2 text-xs"><Download size={14} /> Modelo</button>
-                  <button onClick={() => switchToUpdate(dataset)} className="btn-muted dataset-action-btn dataset-action-update min-w-0 px-3 py-2 text-xs"><RefreshCw size={14} /> Atualizar</button>
-                  <button disabled={!canAppendRows} onClick={() => switchToAppend(dataset)} className="btn-muted dataset-action-btn dataset-action-append min-w-0 px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40"><PlusCircle size={14} /> Incluir</button>
-                  <button disabled={!canPatchRows} onClick={() => switchToPatch(dataset)} className="btn-muted dataset-action-btn dataset-action-patch min-w-0 px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40"><RefreshCw size={14} /> Linhas</button>
-                  <button onClick={() => removeDataset(dataset.id, dataset.name)} className="btn-danger dataset-action-btn dataset-action-delete min-w-0 px-3 py-2 text-xs"><Trash2 size={14} /> Excluir</button>
+                  <button title="Abrir uma prévia das linhas e colunas desta base" onClick={() => openDatasetPreview(dataset)} className="btn-muted dataset-action-btn dataset-action-preview min-w-0 px-3 py-2 text-xs"><Eye size={14} /> Ver dados</button>
+                  <button title="Editar tipos, usos, formatos e colunas calculadas" disabled={!canUseCalculatedMetrics || metricsLoadingId === dataset.id} onClick={() => openDatasetMetrics(dataset)} className="btn-primary dataset-action-btn dataset-action-metrics min-w-0 px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40"><Sparkles size={14} /> {metricsLoadingId === dataset.id ? 'Abrindo...' : 'Editar colunas'}</button>
+                  {isJoinModel ? (
+                    <button title="Refazer o merge usando os dados atuais das bases de origem" disabled={loading} onClick={() => reloadJoinModel(dataset)} className="btn-muted dataset-action-btn dataset-action-reload-model min-w-0 px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40"><RefreshCw size={14} /> Recarregar modelo</button>
+                  ) : (
+                    <>
+                      <button title="Baixar o arquivo modelo com a estrutura desta base" onClick={() => downloadTemplate(dataset.id, dataset.name)} className="btn-muted dataset-action-btn dataset-action-model min-w-0 px-3 py-2 text-xs"><Download size={14} /> Baixar modelo</button>
+                      <button title="Substituir os dados mantendo dashboards conectados" onClick={() => switchToUpdate(dataset)} className="btn-muted dataset-action-btn dataset-action-update min-w-0 px-3 py-2 text-xs"><RefreshCw size={14} /> Substituir base</button>
+                      <button title="Adicionar novas linhas sem apagar o que ja existe" disabled={!canAppendRows} onClick={() => switchToAppend(dataset)} className="btn-muted dataset-action-btn dataset-action-append min-w-0 px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40"><PlusCircle size={14} /> Adicionar linhas</button>
+                      <button title="Atualizar apenas linhas encontradas por uma coluna-chave" onClick={() => switchToPatch(dataset)} className="btn-muted dataset-action-btn dataset-action-patch min-w-0 px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40"><RefreshCw size={14} /> Atualizar por chave</button>
+                    </>
+                  )}
+                  <button title="Excluir esta base de dados" onClick={() => removeDataset(dataset.id, dataset.name)} className="btn-danger dataset-action-btn dataset-action-delete min-w-0 px-3 py-2 text-xs"><Trash2 size={14} /> Excluir base</button>
                 </div>
               </div>
               );
@@ -753,15 +1090,15 @@ export function DatasetUploadPage() {
         <div className="dataset-load-heading">
           <div>
             <p className="text-xs font-black uppercase tracking-[0.18em] text-primary">Carga de dados</p>
-            <h3 className="mt-1 text-xl font-black text-slate-950">{screen === 'new' ? 'Importar novo dataset' : 'Escolha como quer atualizar os dados'}</h3>
+            <h3 className="mt-1 text-xl font-black text-slate-950">{screen === 'new' ? 'Importar nova base de dados' : 'Escolha como quer atualizar os dados'}</h3>
           </div>
-          {screen === 'new' && <p className="text-sm font-semibold text-slate-500">Envie CSV ou Excel para criar uma nova base. Para consultar bases existentes, volte em Ver datasets.</p>}
+          {screen === 'new' && <p className="text-sm font-semibold text-slate-500">Envie CSV ou Excel para criar uma nova base. Para consultar bases existentes, volte em Ver bases.</p>}
         </div>
 
         {screen === 'load' && <div className="dataset-mode-grid">
         {false && <button type="button" onClick={() => setTab('new')} className={`dataset-mode-card ${tab === 'new' ? 'dataset-mode-card-active' : ''}`}>
           <div className="dataset-mode-icon"><UploadCloud size={22} /></div>
-          <div><strong>Novo dataset</strong><span>Cria uma nova base para dashboards, sem aceitar nome duplicado na organização.</span></div>
+          <div><strong>Nova base</strong><span>Cria uma nova base para dashboards, sem aceitar nome duplicado na organizacao.</span></div>
         </button>}
         <button type="button" onClick={() => switchToUpdate()} className={`dataset-mode-card ${tab === 'update' ? 'dataset-mode-card-active' : ''}`}>
           <div className="dataset-mode-icon"><FolderSync size={22} /></div>
@@ -769,14 +1106,14 @@ export function DatasetUploadPage() {
         </button>
         <button type="button" disabled={!canAppendRows} onClick={() => switchToAppend()} className={`dataset-mode-card disabled:cursor-not-allowed disabled:opacity-45 ${tab === 'append' ? 'dataset-mode-card-active' : ''}`}>
           <div className="dataset-mode-icon"><PlusCircle size={22} /></div>
-          <div><strong>Incluir linhas</strong><span>Adiciona novas linhas ao final do dataset, sem apagar o que ja existe.</span></div>
+          <div><strong>Incluir linhas</strong><span>Adiciona novas linhas ao final da base, sem apagar o que ja existe.</span></div>
         </button>
-        <button type="button" disabled={!canPatchRows} onClick={() => switchToPatch()} className={`dataset-mode-card disabled:cursor-not-allowed disabled:opacity-45 ${tab === 'patch' ? 'dataset-mode-card-active' : ''}`}>
+        <button type="button" onClick={() => switchToPatch()} className={`dataset-mode-card disabled:cursor-not-allowed disabled:opacity-45 ${tab === 'patch' ? 'dataset-mode-card-active' : ''}`}>
           <div className="dataset-mode-icon"><RefreshCw size={22} /></div>
           <div><strong>Atualizar linhas</strong><span>Altere somente registros encontrados por uma coluna-chave, sem truncar a base.</span></div>
         </button>
       </div>}
-      {screen === 'load' && (!canAppendRows || !canPatchRows) && <p className="mt-3 rounded-2xl bg-amber-50 p-3 text-xs font-bold text-amber-700">Algumas opcoes de atualizacao estao bloqueadas pelo plano atual da organizacao.</p>}
+      {screen === 'load' && !canAppendRows && <p className="mt-3 rounded-2xl bg-amber-50 p-3 text-xs font-bold text-amber-700">A opcao de incluir novas linhas esta bloqueada pelo plano atual da organizacao.</p>}
 
       </div>
 
@@ -793,10 +1130,10 @@ export function DatasetUploadPage() {
               </label>
 
               <div className="dataset-form-panel">
-                <div><label className="label">Nome do dataset</label><input className="input" value={datasetName} onChange={e => setDatasetName(e.target.value)} placeholder="Ex.: Vendas Maio 2026" /></div>
+                <div><label className="label">Nome da base de dados</label><input className="input" value={datasetName} onChange={e => setDatasetName(e.target.value)} placeholder="Ex.: Vendas Maio 2026" /></div>
                 {nameExists && existingDataset && (
                   <button type="button" onClick={() => switchToUpdate(existingDataset)} className="w-full rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-left text-xs font-black text-red-700">
-                    Esse nome já existe. Clique aqui para atualizar o dataset "{existingDataset.name}".
+                    Esse nome ja existe. Clique aqui para atualizar a base "{existingDataset.name}".
                   </button>
                 )}
                 <div><label className="label">Setor</label><select className="input" value={sectorId} onChange={e => setSectorId(e.target.value)}><option value="">Selecione o setor</option>{sectors.map((sector: any) => <option key={sector.id} value={sector.id}>{sector.name}</option>)}</select></div>
@@ -810,7 +1147,7 @@ export function DatasetUploadPage() {
                     <select className="input" value={newSheetName} onChange={e => setNewSheetName(e.target.value)}>
                       {newSheets.map((sheet) => <option key={sheet} value={sheet}>{sheet}</option>)}
                     </select>
-                    <p className="mt-1 text-xs font-bold text-amber-700">Este arquivo tem mais de uma planilha. Escolha qual aba usar para criar o dataset.</p>
+                    <p className="mt-1 text-xs font-bold text-amber-700">Este arquivo tem mais de uma planilha. Escolha qual aba usar para criar a base.</p>
                   </div>
                 )}
                 <label className="flex items-center gap-3 rounded-2xl bg-slate-50 p-3 text-sm font-bold text-slate-600"><input type="checkbox" checked={saveTemplate} onChange={e => setSaveTemplate(e.target.checked)} /> Salvar modelo reutilizável desta carga</label>
@@ -820,9 +1157,9 @@ export function DatasetUploadPage() {
             </div>
           ) : tab === 'update' ? (
             <div className="dataset-update-panel">
-              <div className="flex items-start gap-3"><RefreshCw className="mt-1 text-primary" /><div><p className="font-black text-slate-950">Atualizar dataset existente</p><p className="text-sm font-semibold text-slate-500">Escolha o dataset, baixe o modelo CSV, preencha com os dados atualizados e suba o arquivo. O ID não muda, então os dashboards continuam funcionando.</p></div></div>
+              <div className="flex items-start gap-3"><RefreshCw className="mt-1 text-primary" /><div><p className="font-black text-slate-950">Atualizar base existente</p><p className="text-sm font-semibold text-slate-500">Escolha a base, baixe o modelo CSV, preencha com os dados atualizados e suba o arquivo. O ID nao muda, entao os dashboards continuam funcionando.</p></div></div>
               <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(260px,1fr)_auto]">
-                <label><span className="form-label">Dataset para atualizar</span><select className="form-select mt-1" value={replaceDatasetId} onChange={e => setReplaceDatasetId(e.target.value)}><option value="">Escolha o dataset</option>{datasets.map((dataset: any) => <option key={dataset.id} value={dataset.id}>{dataset.name} · {Number(dataset.rowCount || 0).toLocaleString('pt-BR')} linhas</option>)}</select></label>
+                <label><span className="form-label">Base para atualizar</span><select className="form-select mt-1" value={replaceDatasetId} onChange={e => setReplaceDatasetId(e.target.value)}><option value="">Escolha a base</option>{updateableDatasets.map((dataset: any) => <option key={dataset.id} value={dataset.id}>{dataset.name} - {Number(dataset.rowCount || 0).toLocaleString('pt-BR')} linhas</option>)}</select></label>
                 <button disabled={!replaceDatasetId} onClick={() => selectedReplaceDataset && downloadTemplate(selectedReplaceDataset.id, selectedReplaceDataset.name)} className="btn-muted self-end disabled:opacity-50"><Download size={16} /> Baixar modelo</button>
               </div>
               <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(260px,1fr)_auto]">
@@ -836,7 +1173,7 @@ export function DatasetUploadPage() {
                   <select className="form-select mt-1" value={replaceSheetName} onChange={e => setReplaceSheetName(e.target.value)}>
                     {replaceSheets.map((sheet) => <option key={sheet} value={sheet}>{sheet}</option>)}
                   </select>
-                  <p className="mt-1 text-xs font-bold text-amber-700">Este arquivo tem mais de uma planilha. Escolha qual aba usar para substituir o dataset.</p>
+                  <p className="mt-1 text-xs font-bold text-amber-700">Este arquivo tem mais de uma planilha. Escolha qual aba usar para substituir a base.</p>
                 </div>
               )}
               {selectedReplaceDataset && (
@@ -848,9 +1185,9 @@ export function DatasetUploadPage() {
             </div>
           ) : tab === 'append' ? (
             <div className="dataset-update-panel">
-              <div className="flex items-start gap-3"><PlusCircle className="mt-1 text-primary" /><div><p className="font-black text-slate-950">Incluir novas linhas</p><p className="text-sm font-semibold text-slate-500">Use esta opcao para adicionar registros ao final do dataset sem apagar ou substituir as linhas que ja existem.</p></div></div>
+              <div className="flex items-start gap-3"><PlusCircle className="mt-1 text-primary" /><div><p className="font-black text-slate-950">Incluir novas linhas</p><p className="text-sm font-semibold text-slate-500">Use esta opcao para adicionar registros ao final da base sem apagar ou substituir as linhas que ja existem.</p></div></div>
               <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(260px,1fr)_auto]">
-                <label><span className="form-label">Dataset que vai receber novas linhas</span><select className="form-select mt-1" value={replaceDatasetId} onChange={e => setReplaceDatasetId(e.target.value)}><option value="">Escolha o dataset</option>{datasets.map((dataset: any) => <option key={dataset.id} value={dataset.id}>{dataset.name} - {Number(dataset.rowCount || 0).toLocaleString('pt-BR')} linhas</option>)}</select></label>
+                <label><span className="form-label">Base que vai receber novas linhas</span><select className="form-select mt-1" value={replaceDatasetId} onChange={e => setReplaceDatasetId(e.target.value)}><option value="">Escolha a base</option>{updateableDatasets.map((dataset: any) => <option key={dataset.id} value={dataset.id}>{dataset.name} - {Number(dataset.rowCount || 0).toLocaleString('pt-BR')} linhas</option>)}</select></label>
                 <button disabled={!replaceDatasetId} onClick={() => selectedReplaceDataset && downloadTemplate(selectedReplaceDataset.id, selectedReplaceDataset.name)} className="btn-muted self-end disabled:opacity-50"><Download size={16} /> Baixar modelo</button>
               </div>
               <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(260px,1fr)_auto]">
@@ -869,7 +1206,7 @@ export function DatasetUploadPage() {
               )}
               {selectedReplaceDataset && (
                 <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-600">
-                  <div><p className="font-black text-slate-950">{selectedReplaceDataset.name}</p><p className="mt-1 text-xs font-semibold text-slate-500">Setor: {selectedReplaceDataset.sector?.name || 'Sem setor'} - {Number(selectedReplaceDataset.rowCount || 0).toLocaleString('pt-BR')} linhas atuais - {(selectedReplaceDataset.columns || []).length} colunas - o arquivo precisa seguir o modelo do dataset.</p></div>
+                  <div><p className="font-black text-slate-950">{selectedReplaceDataset.name}</p><p className="mt-1 text-xs font-semibold text-slate-500">Setor: {selectedReplaceDataset.sector?.name || 'Sem setor'} - {Number(selectedReplaceDataset.rowCount || 0).toLocaleString('pt-BR')} linhas atuais - {(selectedReplaceDataset.columns || []).length} colunas - o arquivo precisa seguir o modelo da base.</p></div>
                   <button type="button" onClick={() => openDatasetPreview(selectedReplaceDataset)} className="btn-muted px-3 py-2 text-xs"><Eye size={14} /> Ver dados</button>
                 </div>
               )}
@@ -878,13 +1215,13 @@ export function DatasetUploadPage() {
             <div className="dataset-update-panel">
               <div className="flex items-start gap-3"><RefreshCw className="mt-1 text-primary" /><div><p className="font-black text-slate-950">Atualizacao por linhas especificas</p><p className="text-sm font-semibold text-slate-500">Use esta opcao quando quiser atualizar somente registros existentes por uma coluna-chave, sem truncar e inserir toda a base.</p></div></div>
               <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(260px,1fr)_auto]">
-                <label><span className="form-label">Dataset para atualizar</span><select className="form-select mt-1" value={replaceDatasetId} onChange={e => setReplaceDatasetId(e.target.value)}><option value="">Escolha o dataset</option>{datasets.map((dataset: any) => <option key={dataset.id} value={dataset.id}>{dataset.name} - {Number(dataset.rowCount || 0).toLocaleString('pt-BR')} linhas</option>)}</select></label>
+                <label><span className="form-label">Base para atualizar</span><select className="form-select mt-1" value={replaceDatasetId} onChange={e => setReplaceDatasetId(e.target.value)}><option value="">Escolha a base</option>{updateableDatasets.map((dataset: any) => <option key={dataset.id} value={dataset.id}>{dataset.name} - {Number(dataset.rowCount || 0).toLocaleString('pt-BR')} linhas</option>)}</select></label>
                 <button disabled={!replaceDatasetId} onClick={() => selectedReplaceDataset && downloadTemplate(selectedReplaceDataset.id, selectedReplaceDataset.name)} className="btn-muted self-end disabled:opacity-50"><Download size={16} /> Baixar modelo</button>
               </div>
               <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(220px,0.8fr)_minmax(260px,1fr)_auto]">
                 <label><span className="form-label">Coluna-chave</span><select className="form-select mt-1" value={patchMatchColumn} onChange={e => setPatchMatchColumn(e.target.value)} disabled={!patchMatchColumns.length}><option value="">Escolha a chave</option>{patchMatchColumns.map((column: any) => <option key={column.id || column.name} value={column.name}>{column.originalName || column.name}</option>)}</select></label>
                 <label><span className="form-label">Arquivo com linhas especificas</span><span className="form-select mt-1 flex cursor-pointer items-center gap-2"><FileSpreadsheet size={16} /> <span className="truncate">{patchFile?.name || 'Selecionar CSV/Excel parcial'}</span><input type="file" accept=".csv,.xls,.xlsx" className="hidden" onChange={e => handlePatchFile(e.target.files?.[0] || null)} /></span></label>
-                <button className="btn-primary self-end" disabled={!canPatchRows || !replaceDatasetId || !patchFile || !patchMatchColumn || loading || sheetLoading === 'patch'} onClick={patchDatasetRows}>{loading ? 'Atualizando...' : 'Atualizar linhas'}</button>
+                <button className="btn-primary self-end" disabled={!replaceDatasetId || !patchFile || !patchMatchColumn || loading || sheetLoading === 'patch'} onClick={patchDatasetRows}>{loading ? 'Atualizando...' : 'Atualizar linhas'}</button>
               </div>
               {sheetLoading === 'patch' && <p className="mt-3 text-xs font-bold text-slate-500">Lendo abas do Excel...</p>}
               {patchSheets.length > 1 && (
@@ -917,9 +1254,9 @@ export function DatasetUploadPage() {
 
         <aside style={{ display: 'none' }} aria-hidden="true">
           <div className="card-premium min-w-0 p-5">
-            <div className="flex items-center justify-between gap-3"><h3 className="text-sm font-black uppercase tracking-[0.15em] text-slate-500">Datasets importados</h3><span className="rounded-full bg-primary-soft px-3 py-1 text-xs font-black text-primary">{datasets.length}</span></div>
+            <div className="flex items-center justify-between gap-3"><h3 className="text-sm font-black uppercase tracking-[0.15em] text-slate-500">Bases importadas</h3><span className="rounded-full bg-primary-soft px-3 py-1 text-xs font-black text-primary">{datasets.length}</span></div>
             <div className="dataset-list-scroll mt-4">
-              {!datasets.length && <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5 text-sm font-bold text-slate-500">Nenhum dataset nesta organização.</div>}
+              {!datasets.length && <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5 text-sm font-bold text-slate-500">Nenhuma base de dados nesta organizacao.</div>}
               {datasets.map((dataset: any) => (
                 <div key={dataset.id} className="dataset-list-card">
                   <div className="dataset-list-info"><div className="rounded-xl bg-primary-soft p-2 text-primary"><Database size={17} /></div><div className="min-w-0 flex-1"><p className="font-black text-slate-950">{dataset.name}</p><p className="text-xs font-semibold text-slate-500"><span className="font-black text-slate-600">Organização:</span> {organization?.name || dataset.organization?.name || 'Org'} · Setor: {dataset.sector?.name || 'Sem setor'}</p></div></div>
@@ -928,12 +1265,12 @@ export function DatasetUploadPage() {
                     <span>{dataset.status}</span>
                   </div>
                   <div className="dataset-list-actions">
-                    <button onClick={() => openDatasetPreview(dataset)} className="btn-muted dataset-action-btn dataset-action-preview min-w-0 px-3 py-2 text-xs"><Eye size={14} /> Lupa</button>
-                    <button onClick={() => downloadTemplate(dataset.id, dataset.name)} className="btn-muted dataset-action-btn dataset-action-model min-w-0 px-3 py-2 text-xs"><Download size={14} /> Modelo</button>
-                    <button onClick={() => switchToUpdate(dataset)} className="btn-muted dataset-action-btn dataset-action-update min-w-0 px-3 py-2 text-xs"><RefreshCw size={14} /> Atualizar</button>
-                    <button disabled={!canAppendRows} onClick={() => switchToAppend(dataset)} className="btn-muted dataset-action-btn dataset-action-append min-w-0 px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40"><PlusCircle size={14} /> Incluir</button>
-                    <button disabled={!canPatchRows} onClick={() => switchToPatch(dataset)} className="btn-muted dataset-action-btn dataset-action-patch min-w-0 px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40"><RefreshCw size={14} /> Linhas</button>
-                    <button onClick={() => removeDataset(dataset.id, dataset.name)} className="btn-danger dataset-action-btn dataset-action-delete min-w-0 px-3 py-2 text-xs"><Trash2 size={14} /> Excluir</button>
+                    <button title="Abrir uma prévia das linhas e colunas desta base" onClick={() => openDatasetPreview(dataset)} className="btn-muted dataset-action-btn dataset-action-preview min-w-0 px-3 py-2 text-xs"><Eye size={14} /> Ver dados</button>
+                    <button title="Baixar o arquivo modelo com a estrutura desta base" onClick={() => downloadTemplate(dataset.id, dataset.name)} className="btn-muted dataset-action-btn dataset-action-model min-w-0 px-3 py-2 text-xs"><Download size={14} /> Baixar modelo</button>
+                    <button title="Substituir os dados mantendo dashboards conectados" onClick={() => switchToUpdate(dataset)} className="btn-muted dataset-action-btn dataset-action-update min-w-0 px-3 py-2 text-xs"><RefreshCw size={14} /> Substituir base</button>
+                    <button title="Adicionar novas linhas sem apagar o que já existe" disabled={!canAppendRows} onClick={() => switchToAppend(dataset)} className="btn-muted dataset-action-btn dataset-action-append min-w-0 px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40"><PlusCircle size={14} /> Adicionar linhas</button>
+                    <button title="Atualizar apenas linhas encontradas por uma coluna-chave" onClick={() => switchToPatch(dataset)} className="btn-muted dataset-action-btn dataset-action-patch min-w-0 px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40"><RefreshCw size={14} /> Atualizar por chave</button>
+                    <button title="Excluir esta base de dados" onClick={() => removeDataset(dataset.id, dataset.name)} className="btn-danger dataset-action-btn dataset-action-delete min-w-0 px-3 py-2 text-xs"><Trash2 size={14} /> Excluir base</button>
                   </div>
                 </div>
               ))}
@@ -944,6 +1281,15 @@ export function DatasetUploadPage() {
       </>}
 
       {previewDataset && <DatasetPreviewModal dataset={previewDataset} onClose={() => setPreviewDataset(null)} />}
+      {joinModelOpen && (
+        <DatasetJoinModelModal
+          datasets={datasets}
+          organization={organization}
+          confirm={confirm}
+          onClose={() => setJoinModelOpen(false)}
+          onCreated={handleJoinModelCreated}
+        />
+      )}
       {editingTemplate && (
         <TemplateMetricsModal
           key={`dataset-metrics-${editingTemplate.id}`}

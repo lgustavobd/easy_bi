@@ -61,6 +61,12 @@ export class DatasetsController {
     return this.service.workbookSheets(file);
   }
 
+  @Post('join-model')
+  @Permissions('dataset.upload')
+  createJoinModel(@Body() payload: any, @CurrentOrganization() org: string, @CurrentUser() user: any) {
+    return this.service.createJoinModel(payload, org, user);
+  }
+
   @Get()
   @Permissions('dashboard.view')
   list(@CurrentOrganization() org: string, @CurrentUser() user: any, @Query('sectorId') sectorId?: string) {
@@ -134,6 +140,12 @@ export class DatasetsController {
     @Body('sheetName') sheetName?: string
   ) {
     return this.service.patchRowsFromFile(id, file, user, org, matchColumn, sheetName);
+  }
+
+  @Post(':id/reload-join-model')
+  @Permissions('dataset.reprocess')
+  reloadJoinModel(@Param('id') id: string, @CurrentOrganization() org: string, @CurrentUser() user: any) {
+    return this.service.reloadJoinModel(id, org, user);
   }
 
   @Delete(':id')

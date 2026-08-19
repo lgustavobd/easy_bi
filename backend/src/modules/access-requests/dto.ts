@@ -1,4 +1,4 @@
-import { IsEmail, IsIn, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsEmail, IsIn, IsNumberString, IsOptional, IsString, MinLength } from 'class-validator';
 
 export class CreateAccessRequestDto {
   @IsString() @MinLength(2) requesterName: string;
@@ -18,5 +18,6 @@ export class ReviewAccessRequestDto {
   @IsOptional() @IsString() document?: string;
   @IsOptional() @IsString() userName?: string;
   @IsOptional() @IsEmail() userEmail?: string;
+  @IsOptional() @IsNumberString() trialDays?: string;
   @IsOptional() @IsString() @MinLength(8) password?: string;
 }

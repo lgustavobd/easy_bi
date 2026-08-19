@@ -10,13 +10,15 @@ export class OrganizationsService {
 
   async create(dto: any, user: any) {
     if (!user.isSuperAdmin) throw new ForbiddenException('Apenas Super Admin pode criar organizacoes.');
-    const planId = await this.plans.resolveAssignablePlanId(dto.planId);
+    const plan = await this.plans.resolveAssignablePlan(dto.planId);
+    const planId = plan?.id || null;
     const org = await this.prisma.organization.create({
       data: {
         name: dto.name,
         slug: slugify(dto.name),
         document: dto.document,
         planId: planId || undefined,
+        accessExpiresAt: this.plans.accessExpirationForPlan(plan) || undefined,
         themeConfig: dto.themeConfig || { accent: 'PURPLE', primary: '#7C3AED' }
       },
       include: { plan: true }
@@ -158,11 +160,15 @@ export class OrganizationsService {
       }
       if (dto.planId !== undefined) {
         if (dto.planId) {
-          const planId = await this.plans.resolveAssignablePlanId(dto.planId);
+          const plan = await this.plans.resolveAssignablePlan(dto.planId);
+          const planId = plan?.id || null;
+          if (!planId) throw new NotFoundException('Plano nao encontrado ou inativo.');
           await this.plans.assertOrganizationFitsPlan(id, planId, 'alterar o plano da organizacao');
           data.planId = planId;
+          data.accessExpiresAt = this.plans.accessExpirationForPlan(plan);
         } else {
           data.planId = null;
+          data.accessExpiresAt = null;
         }
       }
       if (dto.themeConfig !== undefined) data.themeConfig = dto.themeConfig;

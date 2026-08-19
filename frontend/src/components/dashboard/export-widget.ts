@@ -9,6 +9,11 @@ type ExportableWidget = {
   aggregation?: string;
 };
 
+type ExportableDashboard = {
+  name?: string;
+  description?: string;
+};
+
 type DatasetColumn = {
   name?: string;
   originalName?: string;
@@ -51,6 +56,32 @@ const visualLabels: Record<string, string> = {
   FUNNEL_CHART: 'Funil',
   TREEMAP_CHART: 'Mapa de arvore',
   TABLE: 'Tabela'
+};
+
+const themeVariableNames = [
+  '--easy-primary',
+  '--easy-primary-hover',
+  '--easy-primary-light',
+  '--easy-primary-soft',
+  '--easy-primary-rgb',
+  '--easy-primary-2',
+  '--easy-primary-3',
+  '--easy-ring',
+  '--easy-bg',
+  '--easy-bg-soft'
+];
+
+const themeFallbacks: Record<string, string> = {
+  '--easy-primary': '#f97316',
+  '--easy-primary-hover': '#ea580c',
+  '--easy-primary-light': '#fdba74',
+  '--easy-primary-soft': '#fff7ed',
+  '--easy-primary-rgb': '249 115 22',
+  '--easy-primary-2': '#fb923c',
+  '--easy-primary-3': '#fdba74',
+  '--easy-ring': 'rgba(249, 115, 22, 0.16)',
+  '--easy-bg': '#f6efe8',
+  '--easy-bg-soft': '#fffefa'
 };
 
 function escapeXml(value: unknown) {
@@ -131,6 +162,69 @@ function safeFileName(value: string) {
     .slice(0, 80) || 'grafico';
 }
 
+function safeCssValue(value: string, fallback: string) {
+  const normalized = String(value || '').trim();
+  if (!normalized || /[;{}<>]/.test(normalized)) return fallback;
+  return normalized;
+}
+
+function currentThemeTokens() {
+  const root = document.documentElement;
+  const rootStyle = getComputedStyle(root);
+  const variables = Object.fromEntries(
+    themeVariableNames.map((name) => [
+      name,
+      safeCssValue(rootStyle.getPropertyValue(name), themeFallbacks[name])
+    ])
+  ) as Record<string, string>;
+  const accent = String(root.dataset.accent || 'ORANGE').replace(/[^A-Z0-9_-]/gi, '').toUpperCase() || 'ORANGE';
+  const cssVariables = themeVariableNames
+    .map((name) => `${name}: ${variables[name]};`)
+    .join(' ');
+
+  return {
+    accent,
+    variables,
+    cssVariables,
+    primary: variables['--easy-primary'],
+    primary2: variables['--easy-primary-2'],
+    primary3: variables['--easy-primary-3'],
+    primaryRgb: variables['--easy-primary-rgb']
+  };
+}
+
+function collectRuntimeCss() {
+  if (typeof document === 'undefined') return '';
+  const rules: string[] = [];
+  Array.from(document.styleSheets).forEach((sheet) => {
+    try {
+      const cssRules = sheet.cssRules;
+      if (!cssRules) return;
+      rules.push(...Array.from(cssRules).map((rule) => rule.cssText));
+    } catch {
+      // Some browser stylesheets can be protected by CORS; exported HTML still gets the core fallback styles below.
+    }
+  });
+  return rules.join('\n');
+}
+
+function cleanDashboardClone(clone: HTMLElement) {
+  clone.querySelectorAll([
+    'button',
+    'a',
+    '.resize-helper',
+    '.react-resizable-handle',
+    '.dashboard-field-drop-overlay',
+    '.dashboard-widget-type-picker',
+    '.dashboard-widget-type-menu',
+    '.no-drag'
+  ].join(',')).forEach((element) => element.remove());
+
+  clone.querySelectorAll<HTMLElement>('.dashboard-widget-view, .dashboard-widget').forEach((element) => {
+    element.style.boxShadow = '0 18px 44px rgba(15, 23, 42, 0.08)';
+  });
+}
+
 export function describeExportFilters(filters: FilterRule[] = [], dataset?: DatasetLike) {
   const activeFilters = filters.filter((filter) => filter.dimension);
   if (!activeFilters.length) return ['Nenhum filtro aplicado'];
@@ -162,14 +256,11 @@ export async function exportWidgetAsPng(
   const width = 1200;
   const contentWidth = width - 80;
   const chartSvg = element?.querySelector('.recharts-wrapper svg') as SVGSVGElement | null;
-  const rootStyle = getComputedStyle(document.documentElement);
-  const primary = rootStyle.getPropertyValue('--easy-primary').trim() || '#f97316';
-  const primary2 = rootStyle.getPropertyValue('--easy-primary-2').trim() || '#fb923c';
-  const primary3 = rootStyle.getPropertyValue('--easy-primary-3').trim() || '#64748b';
+  const theme = currentThemeTokens();
   const visualType = widget.visualType || widget.type || 'BAR_CHART';
   const filterLines = describeExportFilters(filters, dataset).flatMap((line) => wrapText(`- ${line}`, 108));
   const metaLines = [
-    `Dataset: ${dataset?.name || '-'}`,
+    `Base de dados: ${dataset?.name || '-'}`,
     `Visual: ${visualLabels[visualType] || visualType} | Agregacao: ${aggregationLabels[String(widget.aggregation || '')] || widget.aggregation || '-'}`,
     `Metrica: ${prettify(widget.metricColumn)}${widget.type !== 'KPI' && widget.type !== 'TABLE' ? ` | Dimensao: ${prettify(widget.dimensionColumn)}` : ''}`
   ].flatMap((line) => wrapText(line, 112));
@@ -203,11 +294,11 @@ export async function exportWidgetAsPng(
   }).join('');
 
   const svg = `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" style="--easy-primary:${primary};--easy-primary-2:${primary2};--easy-primary-3:${primary3};font-family:Arial,Helvetica,sans-serif;">
+<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" style="${theme.cssVariables} font-family:Arial,Helvetica,sans-serif;">
   <rect width="${width}" height="${height}" rx="0" fill="#f8fafc"/>
   <rect x="20" y="20" width="${width - 40}" height="${height - 40}" rx="30" fill="#ffffff" stroke="#e2e8f0"/>
   <rect x="40" y="${headerHeight - 24}" width="${contentWidth}" height="${chartHeight + 28}" rx="24" fill="#ffffff" stroke="#e2e8f0"/>
-  <circle cx="68" cy="66" r="18" fill="${primary}"/>
+  <circle cx="68" cy="66" r="18" fill="${theme.primary}"/>
   <text x="98" y="58" fill="#0f172a" font-size="34" font-weight="900">${escapeXml(widget.title || 'Grafico Easy BI')}</text>
   <text x="98" y="86" fill="#64748b" font-size="15" font-weight="700">Exportado em ${escapeXml(generatedAt)} com filtros aplicados</text>
   ${metaText}
@@ -246,4 +337,199 @@ export async function exportWidgetAsPng(
   } finally {
     URL.revokeObjectURL(svgUrl);
   }
+}
+
+export function exportDashboardAsHtml(
+  element: HTMLElement | null,
+  dashboard: ExportableDashboard,
+  dataset?: DatasetLike,
+  filters: FilterRule[] = [],
+  widgetCount = 0
+) {
+  if (typeof document === 'undefined' || !element) return;
+
+  const clone = element.cloneNode(true) as HTMLElement;
+  cleanDashboardClone(clone);
+
+  const theme = currentThemeTokens();
+  const generatedAt = new Date().toLocaleString('pt-BR');
+  const filterLines = describeExportFilters(filters, dataset);
+  const fileBase = safeFileName(`${dashboard?.name || 'dashboard'}-${new Date().toISOString().slice(0, 10)}`);
+  const title = dashboard?.name || 'Dashboard Easy BI';
+  const description = dashboard?.description || 'Exportacao do dashboard com os filtros aplicados no momento da geracao.';
+
+  const filtersHtml = filterLines
+    .map((line) => `<li>${escapeXml(line)}</li>`)
+    .join('');
+
+  const html = `<!doctype html>
+<html lang="pt-BR" data-accent="${escapeXml(theme.accent)}">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${escapeXml(title)} - Easy BI</title>
+  <style>
+    ${collectRuntimeCss()}
+    :root { ${theme.cssVariables} }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: #f8fafc;
+      color: #0f172a;
+      font-family: Arial, Helvetica, sans-serif;
+    }
+    .easybi-export-shell {
+      width: min(1480px, calc(100vw - 40px));
+      margin: 0 auto;
+      padding: 28px 0 42px;
+    }
+    .easybi-export-header {
+      position: relative;
+      overflow: hidden;
+      border-radius: 28px;
+      background:
+        radial-gradient(circle at 88% 24%, color-mix(in srgb, var(--easy-primary) 42%, transparent), transparent 30%),
+        linear-gradient(135deg, #0f172a 0%, color-mix(in srgb, var(--easy-primary) 36%, #111827) 58%, var(--easy-primary-2) 125%);
+      color: #fff;
+      padding: 30px;
+      box-shadow: 0 24px 70px rgba(15, 23, 42, .18);
+    }
+    .easybi-export-kicker {
+      margin: 0 0 10px;
+      color: color-mix(in srgb, var(--easy-primary-2) 85%, white);
+      font-size: 12px;
+      font-weight: 900;
+      letter-spacing: .22em;
+      text-transform: uppercase;
+    }
+    .easybi-export-title {
+      margin: 0;
+      max-width: 980px;
+      font-size: clamp(32px, 5vw, 64px);
+      line-height: .98;
+      letter-spacing: -.05em;
+      font-weight: 900;
+    }
+    .easybi-export-description {
+      max-width: 980px;
+      margin: 14px 0 0;
+      color: rgba(255, 255, 255, .82);
+      font-size: 15px;
+      font-weight: 700;
+      line-height: 1.55;
+    }
+    .easybi-export-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 22px;
+      padding: 0;
+      list-style: none;
+    }
+    .easybi-export-meta li {
+      border: 1px solid rgba(255,255,255,.2);
+      border-radius: 999px;
+      background: rgba(255,255,255,.1);
+      padding: 9px 13px;
+      font-size: 12px;
+      font-weight: 900;
+    }
+    .easybi-export-print {
+      position: absolute;
+      right: 24px;
+      top: 24px;
+      border: 1px solid rgba(255,255,255,.26);
+      border-radius: 999px;
+      background: rgba(255,255,255,.14);
+      color: #fff;
+      padding: 10px 15px;
+      font-weight: 900;
+      cursor: pointer;
+    }
+    .easybi-export-filters {
+      margin-top: 20px;
+      border-radius: 22px;
+      border: 1px solid #e2e8f0;
+      background: #fff;
+      padding: 18px 20px;
+      box-shadow: 0 12px 34px rgba(15, 23, 42, .06);
+    }
+    .easybi-export-filters strong {
+      display: block;
+      margin-bottom: 10px;
+      color: #0f172a;
+      font-size: 13px;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+    }
+    .easybi-export-filters ul {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+    .easybi-export-filters li {
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--easy-primary) 12%, #fff);
+      color: #334155;
+      padding: 8px 11px;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .easybi-export-dashboard {
+      margin-top: 20px;
+      border-radius: 28px;
+      background: #fff;
+      padding: 18px;
+      box-shadow: 0 18px 60px rgba(15, 23, 42, .08);
+    }
+    .easybi-export-dashboard .dashboard-canvas {
+      min-height: 0 !important;
+      background: transparent !important;
+      padding: 0 !important;
+      box-shadow: none !important;
+      border: 0 !important;
+    }
+    .easybi-export-dashboard .react-grid-layout {
+      width: 100% !important;
+      min-height: 0 !important;
+    }
+    .easybi-export-dashboard .dashboard-widget-view,
+    .easybi-export-dashboard .dashboard-widget {
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+    @media print {
+      body { background: #fff; }
+      .easybi-export-shell { width: 100%; padding: 0; }
+      .easybi-export-header, .easybi-export-filters, .easybi-export-dashboard { box-shadow: none; }
+      .easybi-export-print { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="easybi-export-shell">
+    <section class="easybi-export-header">
+      <button class="easybi-export-print" onclick="window.print()">Imprimir / salvar PDF</button>
+      <p class="easybi-export-kicker">Easy BI Export</p>
+      <h1 class="easybi-export-title">${escapeXml(title)}</h1>
+      <p class="easybi-export-description">${escapeXml(description)}</p>
+      <ul class="easybi-export-meta">
+        <li>Base: ${escapeXml(dataset?.name || '-')}</li>
+        <li>${Number(widgetCount || 0).toLocaleString('pt-BR')} grafico(s)</li>
+        <li>Gerado em ${escapeXml(generatedAt)}</li>
+      </ul>
+    </section>
+    <section class="easybi-export-filters">
+      <strong>Filtros usados na exportacao</strong>
+      <ul>${filtersHtml}</ul>
+    </section>
+    <section class="easybi-export-dashboard">${clone.outerHTML}</section>
+  </main>
+</body>
+</html>`;
+
+  downloadBlob(new Blob([html], { type: 'text/html;charset=utf-8' }), `${fileBase}.html`);
 }

@@ -53,7 +53,12 @@ export class AccessRequestsService {
       return this.serialize(rejected);
     }
 
-    const planId = await this.plans.resolveAssignablePlanId(dto.planId || request.requestedPlanId);
+    const selectedPlan = await this.plans.resolveAssignablePlan(dto.planId || request.requestedPlanId);
+    const planId = selectedPlan?.id || null;
+    const requestedTrialDays = Number(dto.trialDays || 0);
+    const accessExpiresAt = requestedTrialDays > 0
+      ? new Date(Date.now() + requestedTrialDays * 24 * 60 * 60 * 1000)
+      : this.plans.accessExpirationForPlan(selectedPlan);
     const organizationName = dto.organizationName || request.companyName;
     const userName = dto.userName || request.requesterName;
     const userEmail = String(dto.userEmail || request.requesterEmail).toLowerCase();
@@ -74,6 +79,7 @@ export class AccessRequestsService {
           slug,
           document: dto.document || request.document,
           planId,
+          accessExpiresAt,
           themeConfig: { accent: 'PURPLE', primary: '#7C3AED' }
         }
       });
@@ -125,7 +131,7 @@ export class AccessRequestsService {
       action: 'access_request.approved',
       entity: 'access_request',
       entityId: id,
-      metadata: { createdUserId: approved.createdUserId, planId }
+      metadata: { createdUserId: approved.createdUserId, planId, accessExpiresAt }
     });
     return this.serializeWithCreatedRecords(approved);
   }

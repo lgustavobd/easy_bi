@@ -54,20 +54,13 @@ function statusLabel(status?: string) {
 }
 
 function ExecutiveCard({ title, value, detail, icon: Icon, tone = 'orange' }: { title: string; value: string; detail: string; icon: any; tone?: 'orange' | 'slate' | 'green' | 'blue' }) {
-  const toneClass = {
-    orange: 'bg-orange-50 text-orange-600',
-    slate: 'bg-slate-100 text-slate-700',
-    green: 'bg-emerald-50 text-emerald-700',
-    blue: 'bg-sky-50 text-sky-700'
-  }[tone];
-
   return (
-    <div className="group relative min-h-[138px] overflow-hidden rounded-[1.55rem] border border-slate-200 bg-white/95 p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-soft">
-      <div className={`absolute right-4 top-4 rounded-2xl p-3 transition group-hover:scale-105 ${toneClass}`}><Icon size={19} /></div>
-      <div className="relative max-w-[78%]">
-        <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">{title}</p>
-        <p className="mt-3 text-4xl font-black leading-none tracking-tight text-slate-950">{value}</p>
-        <p className="mt-3 text-xs font-bold leading-snug text-slate-500">{detail}</p>
+    <div className={`overview-stat-card overview-stat-${tone}`}>
+      <div className="overview-stat-icon"><Icon size={18} /></div>
+      <div className="overview-stat-copy">
+        <p>{title}</p>
+        <strong>{value}</strong>
+        <span>{detail}</span>
       </div>
     </div>
   );
@@ -75,15 +68,15 @@ function ExecutiveCard({ title, value, detail, icon: Icon, tone = 'orange' }: { 
 
 function ProgressInsight({ label, value, detail }: { label: string; value: number; detail: string }) {
   return (
-    <div className="rounded-2xl border border-slate-100 bg-white p-4">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-sm font-black text-slate-900">{label}</p>
-        <span className="rounded-full px-2.5 py-1 text-xs font-black" style={{ backgroundColor: 'var(--easy-primary-soft)', color: 'var(--easy-primary)' }}>{value}%</span>
+    <div className="overview-progress-card">
+      <div className="overview-progress-head">
+        <p>{label}</p>
+        <span>{value}%</span>
       </div>
-      <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100">
-        <div className="h-full rounded-full" style={{ width: `${value}%`, background: 'linear-gradient(90deg, var(--easy-primary), var(--easy-primary-3))' }} />
+      <div className="overview-progress-track">
+        <div style={{ width: `${value}%` }} />
       </div>
-      <p className="mt-2 text-xs font-semibold text-slate-500">{detail}</p>
+      <p>{detail}</p>
     </div>
   );
 }
@@ -127,30 +120,21 @@ export function HomePage() {
   const biggestDataset = topDatasets[0];
 
   return (
-    <div className="space-y-6">
-      <section className="dashboard-gallery-hero selection-hero selection-hero-overview">
-        <div className="dashboard-gallery-hero-content">
+    <div className="overview-page space-y-5">
+      <section className="dashboard-gallery-hero selection-hero selection-hero-overview overview-hero">
+        <div className="dashboard-gallery-hero-content overview-hero-copy">
           <p className="eyebrow text-white/80">Easy BI Workspace</p>
-          <h3>Painel vivo da operacao</h3>
-          <p>Resumo rapido para entender se os dados estao saudaveis, quais datasets sustentam os dashboards e onde houve atividade recente.</p>
+          <h3>Visao geral da operacao</h3>
+          <p>Uma leitura rapida do ambiente: dados carregados, dashboards publicados, bases saudaveis e proximas acoes.</p>
         </div>
-        <div className="selection-hero-actions">
-          <Link to="/datasets/upload" className="dashboard-gallery-new-btn"><Database size={16} /> Datasets</Link>
+        <div className="selection-hero-actions overview-hero-actions">
+          <Link to="/datasets/upload" className="dashboard-gallery-new-btn"><Database size={16} /> Bases de dados</Link>
           <Link to="/dashboards/new" className="dashboard-gallery-new-btn"><Plus size={16} /> Novo dashboard</Link>
         </div>
-        <div className="selection-hero-metrics">
-          <div>
-            <p>Linhas importadas</p>
-            <strong>{formatNumber(rowCount)}</strong>
-          </div>
-          <div>
-            <p>Publicacao</p>
-            <strong>{publicationRate}%</strong>
-          </div>
-          <div>
-            <p>Saude dos dados</p>
-            <strong>{dataHealth}%</strong>
-          </div>
+        <div className="selection-hero-metrics overview-hero-metrics">
+          <div><p>Linhas importadas</p><strong>{formatNumber(rowCount)}</strong></div>
+          <div><p>Publicacao</p><strong>{publicationRate}%</strong></div>
+          <div><p>Saude dos dados</p><strong>{dataHealth}%</strong></div>
         </div>
       </section>
 
@@ -158,220 +142,139 @@ export function HomePage() {
         <div className="card-premium flex items-center gap-3 p-6 text-sm font-bold text-slate-500"><Loader2 className="animate-spin" size={18} /> Carregando resumo do banco...</div>
       ) : (
         <>
-          <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <section className="overview-stat-grid">
             <ExecutiveCard title="Dashboards" value={formatNumber(dashboards.length)} detail={`${formatNumber(publishedCount)} publicados - ${formatNumber(draftCount)} rascunhos`} icon={LayoutDashboard} />
-            <ExecutiveCard title="Datasets" value={formatNumber(datasets.length)} detail={`${formatNumber(readyDatasets || healthyDatasets)} prontos - ${formatNumber(failedDatasets)} falhas`} icon={Database} tone="blue" />
+            <ExecutiveCard title="Bases de dados" value={formatNumber(datasets.length)} detail={`${formatNumber(readyDatasets || healthyDatasets)} prontas - ${formatNumber(failedDatasets)} falhas`} icon={Database} tone="blue" />
             <ExecutiveCard title="Quadros" value={formatNumber(widgetCount)} detail={`${formatNumber(totalColumns)} colunas disponiveis`} icon={BarChart3} tone="green" />
             <ExecutiveCard title="Usuarios" value={users.length ? formatNumber(users.length) : '-'} detail={users.length ? `${formatNumber(activeUsers)} ativos` : 'conforme permissao'} icon={Users} tone="slate" />
           </section>
 
-          <section className="grid gap-6 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-            <div className="card-premium overflow-hidden">
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-5">
-                <div className="flex items-center gap-3">
-                  <div className="rounded-2xl bg-slate-950 p-3 text-white"><Gauge size={20} /></div>
-                  <div>
-                    <p className="text-lg font-black text-slate-950">Saude operacional</p>
-                    <p className="text-sm font-semibold text-slate-500">Publicacao, cargas e cobertura dos modelos.</p>
-                  </div>
+          <section className="overview-command-grid">
+            <article className="overview-panel overview-health-panel">
+              <div className="overview-panel-head">
+                <div className="overview-panel-title">
+                  <span className="overview-panel-icon"><Gauge size={19} /></span>
+                  <div><p>Saude operacional</p><small>Publicacao, cargas e cobertura dos modelos.</small></div>
                 </div>
-                <span className="rounded-full px-3 py-1 text-xs font-black" style={{ backgroundColor: 'var(--easy-primary-soft)', color: 'var(--easy-primary)' }}>
-                  {failedDatasets ? `${formatNumber(failedDatasets)} falha(s)` : 'Sem falhas criticas'}
-                </span>
+                <strong className="overview-status-pill">{failedDatasets ? `${formatNumber(failedDatasets)} falha(s)` : 'Sem falhas criticas'}</strong>
               </div>
-              <div className="grid gap-3 p-5">
+              <div className="overview-progress-list">
                 <ProgressInsight label="Dashboards publicados" value={publicationRate} detail={`${formatNumber(publishedCount)} de ${formatNumber(dashboards.length)} dashboards publicados`} />
-                <ProgressInsight label="Datasets sem falha" value={dataHealth} detail={`${formatNumber(failedDatasets)} dataset(s) com falha para acompanhar`} />
-                <ProgressInsight label="Cobertura dos modelos" value={modelCoverage} detail={`${formatNumber(totalColumns)} colunas mapeadas nos datasets`} />
+                <ProgressInsight label="Bases sem falha" value={dataHealth} detail={`${formatNumber(failedDatasets)} base(s) com falha para acompanhar`} />
+                <ProgressInsight label="Cobertura dos modelos" value={modelCoverage} detail={`${formatNumber(totalColumns)} colunas mapeadas nas bases`} />
               </div>
-            </div>
+            </article>
 
-            <div className="card-premium overflow-hidden">
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-5">
-                <div className="flex items-center gap-3">
-                  <div className="rounded-2xl p-3 text-white shadow-soft" style={{ background: 'linear-gradient(135deg, var(--easy-primary), var(--easy-primary-2))' }}>
-                    <Sparkles size={20} />
-                  </div>
-                  <div>
-                    <p className="text-lg font-black text-slate-950">Mapa dos dados</p>
-                    <p className="text-sm font-semibold text-slate-500">Volume, maior base e sinais importantes para acompanhar.</p>
-                  </div>
+            <article className="overview-panel overview-map-panel">
+              <div className="overview-panel-head">
+                <div className="overview-panel-title">
+                  <span className="overview-panel-icon is-primary"><Sparkles size={19} /></span>
+                  <div><p>Mapa dos dados</p><small>Volume, maior base e sinais importantes.</small></div>
                 </div>
-                <span className="rounded-full px-3 py-1 text-xs font-black" style={{ backgroundColor: 'var(--easy-primary-soft)', color: 'var(--easy-primary)' }}>
-                  <Clock3 size={13} className="mr-1 inline" /> atualizado agora
-                </span>
+                <strong className="overview-status-pill"><Clock3 size={13} /> atualizado agora</strong>
               </div>
-
-              <div className="grid gap-3 p-5">
-                <div className="relative overflow-hidden rounded-[1.35rem] border border-slate-200 bg-slate-950 p-4 text-white shadow-sm">
-                  <div className="absolute -right-8 -top-12 h-32 w-32 rounded-full opacity-25" style={{ background: 'var(--easy-primary)' }} />
-                  <div className="relative">
-                    <p className="text-xs font-black uppercase tracking-[0.18em] text-white/60">Linhas importadas</p>
-                    <p className="mt-2 text-4xl font-black tracking-tight">{formatNumber(rowCount)}</p>
-                    <p className="mt-1 text-xs font-bold text-white/65">{formatNumber(datasets.length)} dataset(s) - {formatNumber(totalColumns)} coluna(s)</p>
-                  </div>
+              <div className="overview-map-list">
+                <div className="overview-map-total">
+                  <span>Linhas importadas</span>
+                  <strong>{formatNumber(rowCount)}</strong>
+                  <small>{formatNumber(datasets.length)} base(s) - {formatNumber(totalColumns)} coluna(s)</small>
                 </div>
-                <div className="flex items-center justify-between gap-4 rounded-[1.2rem] border border-slate-100 bg-white p-4 shadow-sm">
-                  <div>
-                    <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-400">Media</p>
-                    <p className="mt-1 text-xs font-bold text-slate-500">linhas/dataset</p>
-                  </div>
-                  <p className="text-2xl font-black text-slate-950">{formatNumber(averageRows)}</p>
-                </div>
-                <div className="flex items-center justify-between gap-4 rounded-[1.2rem] border border-slate-100 bg-white p-4 shadow-sm">
-                  <div className="min-w-0">
-                    <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-400">Maior base</p>
-                    <p className="mt-1 text-xs font-bold text-slate-500">{formatNumber(biggestDataset?.rowCount || 0)} linhas</p>
-                  </div>
-                  <p className="max-w-[52%] truncate text-right text-xl font-black text-slate-950">{biggestDataset?.name || '-'}</p>
-                </div>
-                <div className="flex items-center justify-between gap-4 rounded-[1.2rem] border border-slate-100 bg-white p-4 shadow-sm">
-                  <div>
-                    <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-400">Cargas</p>
-                    <p className="mt-1 text-xs font-bold text-slate-500">prontas</p>
-                  </div>
-                  <p className="text-2xl font-black text-slate-950">{formatNumber(readyDatasets || healthyDatasets)}/{formatNumber(datasets.length)}</p>
-                </div>
+                <div className="overview-map-row"><span>Media por base</span><strong>{formatNumber(averageRows)}</strong><small>em media</small></div>
+                <div className="overview-map-row"><span>Maior base</span><strong>{biggestDataset?.name || '-'}</strong><small>{formatNumber(biggestDataset?.rowCount || 0)} linhas</small></div>
+                <div className="overview-map-row"><span>Cargas prontas</span><strong>{formatNumber(readyDatasets || healthyDatasets)}/{formatNumber(datasets.length)}</strong><small>bases disponiveis</small></div>
               </div>
-            </div>
+            </article>
           </section>
 
-          <section className="grid gap-6 xl:grid-cols-[minmax(0,0.72fr)_minmax(0,1.28fr)]">
-            <div className="card-premium overflow-hidden">
-              <div className="flex items-center gap-3 border-b border-slate-100 p-5">
-                <div className="rounded-2xl bg-slate-950 p-3 text-white"><Activity size={20} /></div>
-                <div>
-                  <p className="text-lg font-black text-slate-950">Atividade recente</p>
-                  <p className="text-sm font-semibold text-slate-500">Ultimos eventos visiveis para seu perfil.</p>
+          <section className="overview-lists-grid">
+            <article className="overview-panel">
+              <div className="overview-panel-head">
+                <div className="overview-panel-title">
+                  <span className="overview-panel-icon is-soft"><Database size={19} /></span>
+                  <div><p>Bases mais pesadas</p><small>Ranking por volume de linhas importadas.</small></div>
                 </div>
+                <Link to="/datasets/upload" className="overview-panel-link">Abrir bases</Link>
               </div>
-              <div className="max-h-[330px] space-y-3 overflow-y-auto p-5 pr-3">
-                {recentActivity.map((log: any) => (
-                  <div key={log.id} className="flex gap-3 rounded-2xl border border-slate-100 bg-white p-3 shadow-sm">
-                    <div className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full shadow-[0_0_0_4px_var(--easy-primary-soft)]" style={{ backgroundColor: 'var(--easy-primary)' }} />
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-black text-slate-900">{log.action}</p>
-                      <p className="mt-1 text-xs font-semibold text-slate-400">{log.entity || 'evento'} - {formatDate(log.createdAt)}</p>
-                    </div>
-                  </div>
-                ))}
-                {!recentActivity.length && <p className="rounded-2xl border border-dashed border-slate-300 p-5 text-sm font-bold text-slate-500">Sem logs disponiveis para este perfil.</p>}
-              </div>
-            </div>
-
-            <div className="card-premium overflow-hidden">
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-5">
-                <div>
-                  <p className="text-lg font-black text-slate-950">Leitura rapida</p>
-                  <p className="mt-1 text-sm font-semibold text-slate-500">Dados de apoio para entender o ambiente sem abrir outras telas.</p>
-                </div>
-              </div>
-              <div className="grid gap-3 p-5 sm:grid-cols-3">
-                <div className="rounded-[1.35rem] border border-slate-100 bg-white p-4 shadow-sm">
-                  <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-400">Auditoria</p>
-                  <p className="mt-2 text-3xl font-black text-slate-950">{formatNumber(auditLogs.length)}</p>
-                  <p className="mt-1 text-xs font-bold text-slate-500">eventos carregados</p>
-                </div>
-                <div className="rounded-[1.35rem] border border-slate-100 bg-white p-4 shadow-sm">
-                  <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-400">Rascunhos</p>
-                  <p className="mt-2 text-3xl font-black text-slate-950">{formatNumber(draftCount)}</p>
-                  <p className="mt-1 text-xs font-bold text-slate-500">dashboards pendentes</p>
-                </div>
-                <div className="rounded-[1.35rem] border border-slate-100 bg-white p-4 shadow-sm">
-                  <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-400">Usuarios ativos</p>
-                  <p className="mt-2 text-3xl font-black text-slate-950">{users.length ? formatNumber(activeUsers) : '-'}</p>
-                  <p className="mt-1 text-xs font-bold text-slate-500">no workspace atual</p>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <section className="grid gap-6 xl:grid-cols-2">
-            <div className="card-premium overflow-hidden">
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-5">
-                <div>
-                  <p className="text-lg font-black text-slate-950">Datasets mais pesados</p>
-                  <p className="mt-1 text-sm font-semibold text-slate-500">Ranking por volume de linhas importadas.</p>
-                </div>
-                <Link to="/datasets/upload" className="btn-muted px-3 py-2 text-xs">Abrir datasets</Link>
-              </div>
-              <div className="max-h-[390px] space-y-3 overflow-y-auto p-5 pr-3">
+              <div className="overview-scroll-list">
                 {topDatasets.map((dataset: any, index: number) => {
                   const rows = Number(dataset.rowCount || 0);
                   return (
-                    <div key={dataset.id} className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
-                      <div className="flex items-start gap-3">
-                        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-2xl text-xs font-black" style={{ backgroundColor: 'var(--easy-primary-soft)', color: 'var(--easy-primary)' }}>{index + 1}</span>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <p className="truncate font-black text-slate-950">{dataset.name}</p>
-                              <p className="mt-1 text-xs font-bold text-slate-400">{statusLabel(dataset.status)} - {(dataset.columns || []).length} colunas</p>
-                            </div>
-                            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-600">{formatNumber(rows)}</span>
-                          </div>
-                          <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100">
-                            <div className="h-full rounded-full" style={{ width: `${percent(rows, maxDatasetRows)}%`, background: 'linear-gradient(90deg, var(--easy-primary), var(--easy-primary-3))' }} />
-                          </div>
+                    <div key={dataset.id} className="overview-ranking-row">
+                      <span className="overview-ranking-index">{index + 1}</span>
+                      <div className="overview-ranking-main">
+                        <div className="overview-ranking-copy">
+                          <strong>{dataset.name}</strong>
+                          <small>{statusLabel(dataset.status)} - {(dataset.columns || []).length} colunas</small>
                         </div>
+                        <em>{formatNumber(rows)} linhas</em>
+                        <div className="overview-ranking-track"><div style={{ width: `${percent(rows, maxDatasetRows)}%` }} /></div>
                       </div>
                     </div>
                   );
                 })}
-                {!topDatasets.length && <p className="rounded-2xl border border-dashed border-slate-300 p-5 text-sm font-bold text-slate-500">Nenhum dataset importado ainda.</p>}
+                {!topDatasets.length && <p className="overview-empty">Nenhuma base de dados importada ainda.</p>}
               </div>
-            </div>
+            </article>
 
-            <div className="card-premium overflow-hidden">
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-5">
-                <div>
-                  <p className="text-lg font-black text-slate-950">Dashboards recentes</p>
-                  <p className="mt-1 text-sm font-semibold text-slate-500">Ultimos paineis salvos para a organizacao atual.</p>
+            <article className="overview-panel">
+              <div className="overview-panel-head">
+                <div className="overview-panel-title">
+                  <span className="overview-panel-icon is-soft"><LayoutDashboard size={19} /></span>
+                  <div><p>Dashboards recentes</p><small>Ultimos paineis salvos para a organizacao atual.</small></div>
                 </div>
-                <Link to="/dashboards" className="btn-muted px-3 py-2 text-xs">Ver todos</Link>
+                <Link to="/dashboards" className="overview-panel-link">Ver todos</Link>
               </div>
-              <div className="max-h-[390px] divide-y divide-slate-100 overflow-y-auto">
+              <div className="overview-scroll-list">
                 {recentDashboards.map((dashboard: any) => (
-                  <Link key={dashboard.id} to={`/dashboards/${dashboard.id}/view`} className="flex items-center justify-between gap-4 bg-white/80 px-5 py-4 transition hover:bg-slate-50">
-                    <div className="flex min-w-0 items-center gap-3">
-                      <div className="rounded-2xl p-3" style={{ backgroundColor: 'var(--easy-primary-soft)', color: 'var(--easy-primary)' }}><LayoutDashboard size={18} /></div>
-                      <div className="min-w-0">
-                        <p className="truncate font-black text-slate-950">{dashboard.name}</p>
-                        <p className="mt-1 text-xs font-semibold text-slate-400">{dashboard.widgets?.length || 0} quadros - {dashboard.isPublished ? 'publicado' : 'rascunho'} - {formatDate(dashboard.updatedAt || dashboard.createdAt)}</p>
-                      </div>
+                  <Link key={dashboard.id} to={`/dashboards/${dashboard.id}/view`} className="overview-dashboard-row">
+                    <span><LayoutDashboard size={17} /></span>
+                    <div>
+                      <strong>{dashboard.name}</strong>
+                      <small>{dashboard.widgets?.length || 0} quadros - {dashboard.isPublished ? 'publicado' : 'rascunho'} - {formatDate(dashboard.updatedAt || dashboard.createdAt)}</small>
                     </div>
-                    <ArrowUpRight size={18} className="shrink-0 text-slate-400" />
+                    <ArrowUpRight size={17} />
                   </Link>
                 ))}
-                {!recentDashboards.length && <p className="m-5 rounded-2xl border border-dashed border-slate-300 p-5 text-sm font-bold text-slate-500">Nenhum dashboard criado ainda.</p>}
+                {!recentDashboards.length && <p className="overview-empty">Nenhum dashboard criado ainda.</p>}
               </div>
-            </div>
+            </article>
           </section>
 
-          <section className="card-premium overflow-hidden">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-5">
-              <div>
-                <p className="text-lg font-black text-slate-950">Acoes rapidas</p>
-                <p className="mt-1 text-sm font-semibold text-slate-500">Caminhos principais para continuar a operacao.</p>
+          <section className="overview-bottom-grid">
+            <article className="overview-panel">
+              <div className="overview-panel-head">
+                <div className="overview-panel-title">
+                  <span className="overview-panel-icon"><Activity size={19} /></span>
+                  <div><p>Atividade recente</p><small>Ultimos eventos visiveis para seu perfil.</small></div>
+                </div>
               </div>
-            </div>
-            <div className="grid gap-4 p-5 md:grid-cols-3">
-              <Link to="/datasets/upload" className="rounded-[1.5rem] border border-slate-200 bg-white/90 p-5 transition hover:-translate-y-0.5 hover:shadow-soft" style={{ ['--tw-ring-color' as any]: 'var(--easy-primary)' }}>
-                <FileSpreadsheet style={{ color: 'var(--easy-primary)' }} size={22} />
-                <p className="mt-3 font-black text-slate-950">Atualizar dados</p>
-                <p className="mt-1 text-xs font-bold text-slate-500">Criar dataset, incluir linhas ou atualizar por chave.</p>
-              </Link>
-              <Link to="/dashboards/new" className="rounded-[1.5rem] border border-slate-200 bg-white/90 p-5 transition hover:-translate-y-0.5 hover:shadow-soft">
-                <Table2 style={{ color: 'var(--easy-primary)' }} size={22} />
-                <p className="mt-3 font-black text-slate-950">Montar dashboard</p>
-                <p className="mt-1 text-xs font-bold text-slate-500">Use modelos prontos e edite os quadros.</p>
-              </Link>
-              <Link to="/audit" className="rounded-[1.5rem] border border-slate-200 bg-white/90 p-5 transition hover:-translate-y-0.5 hover:shadow-soft">
-                <ShieldCheck style={{ color: 'var(--easy-primary)' }} size={22} />
-                <p className="mt-3 font-black text-slate-950">Ver auditoria</p>
-                <p className="mt-1 text-xs font-bold text-slate-500">Acompanhe eventos quando seu perfil permitir.</p>
-              </Link>
-            </div>
+              <div className="overview-activity-list">
+                {recentActivity.map((log: any) => (
+                  <div key={log.id} className="overview-activity-row">
+                    <span />
+                    <div>
+                      <strong>{log.action}</strong>
+                      <small>{log.entity || 'evento'} - {formatDate(log.createdAt)}</small>
+                    </div>
+                  </div>
+                ))}
+                {!recentActivity.length && <p className="overview-empty">Sem logs disponiveis para este perfil.</p>}
+              </div>
+            </article>
+
+            <article className="overview-panel overview-actions-panel">
+              <div className="overview-panel-head">
+                <div className="overview-panel-title">
+                  <span className="overview-panel-icon is-primary"><ShieldCheck size={19} /></span>
+                  <div><p>Proximas acoes</p><small>Caminhos principais para continuar a operacao.</small></div>
+                </div>
+              </div>
+              <div className="overview-action-grid">
+                <Link to="/datasets/upload"><FileSpreadsheet size={20} /><strong>Atualizar dados</strong><small>Criar base, incluir linhas ou atualizar por chave.</small></Link>
+                <Link to="/dashboards/new"><Table2 size={20} /><strong>Montar dashboard</strong><small>Use modelos prontos e edite os quadros.</small></Link>
+                <Link to="/audit"><ShieldCheck size={20} /><strong>Ver auditoria</strong><small>Acompanhe eventos quando seu perfil permitir.</small></Link>
+              </div>
+            </article>
           </section>
         </>
       )}

@@ -10,6 +10,31 @@ async function main() {
   const passwordHash = await bcrypt.hash(seedPassword, 10);
   const plans = [
     {
+      id: '00000000-0000-0000-0000-000000000100',
+      code: 'FREE',
+      name: 'Free',
+      description: 'Teste controlado para conhecer o Easy BI com poucas bases e dados limitados.',
+      priceLabel: 'Gratis',
+      monthlyPrice: 0,
+      maxUsers: 1,
+      maxDatasets: 2,
+      maxDashboards: 1,
+      maxRowsPerDataset: null,
+      maxTotalRows: 200,
+      trialDays: 7,
+      canExportCharts: false,
+      canUseCalculatedMetrics: false,
+      canUsePatchRows: true,
+      canUseAppendRows: false,
+      canUseCustomLogo: false,
+      canCreateSectors: false,
+      canUseDatabaseConnections: false,
+      requiresDedicatedInfra: false,
+      isDefault: true,
+      isActive: true,
+      sortOrder: 0
+    },
+    {
       id: '00000000-0000-0000-0000-000000000101',
       code: 'STARTER',
       name: 'Starter',
@@ -19,16 +44,45 @@ async function main() {
       maxUsers: 1,
       maxDatasets: 5,
       maxDashboards: 3,
-      maxRowsPerDataset: 2000,
+      maxRowsPerDataset: null,
+      maxTotalRows: 2000,
+      trialDays: null,
       canExportCharts: false,
       canUseCalculatedMetrics: false,
-      canUsePatchRows: false,
+      canUsePatchRows: true,
       canUseAppendRows: false,
       canUseCustomLogo: false,
       canCreateSectors: false,
-      isDefault: true,
+      canUseDatabaseConnections: false,
+      requiresDedicatedInfra: false,
+      isDefault: false,
       isActive: true,
       sortOrder: 10
+    },
+    {
+      id: '00000000-0000-0000-0000-000000000104',
+      code: 'ESSENTIAL',
+      name: 'Essencial',
+      description: 'Plano leve para operacoes pequenas com ate 3 usuarios e 5 mil linhas totais.',
+      priceLabel: 'R$ 249,00/mes',
+      monthlyPrice: 249.00,
+      maxUsers: 3,
+      maxDatasets: 8,
+      maxDashboards: 5,
+      maxRowsPerDataset: null,
+      maxTotalRows: 5000,
+      trialDays: null,
+      canExportCharts: true,
+      canUseCalculatedMetrics: true,
+      canUsePatchRows: true,
+      canUseAppendRows: true,
+      canUseCustomLogo: false,
+      canCreateSectors: true,
+      canUseDatabaseConnections: false,
+      requiresDedicatedInfra: false,
+      isDefault: false,
+      isActive: true,
+      sortOrder: 15
     },
     {
       id: '00000000-0000-0000-0000-000000000102',
@@ -40,13 +94,17 @@ async function main() {
       maxUsers: 5,
       maxDatasets: 25,
       maxDashboards: 15,
-      maxRowsPerDataset: 5000,
+      maxRowsPerDataset: null,
+      maxTotalRows: 5000,
+      trialDays: null,
       canExportCharts: true,
       canUseCalculatedMetrics: true,
-      canUsePatchRows: false,
+      canUsePatchRows: true,
       canUseAppendRows: true,
       canUseCustomLogo: false,
       canCreateSectors: true,
+      canUseDatabaseConnections: false,
+      requiresDedicatedInfra: false,
       isDefault: false,
       isActive: true,
       sortOrder: 20
@@ -61,17 +119,23 @@ async function main() {
       maxUsers: 10,
       maxDatasets: 100,
       maxDashboards: 60,
-      maxRowsPerDataset: 11000,
+      maxRowsPerDataset: null,
+      maxTotalRows: 11000,
+      trialDays: null,
       canExportCharts: true,
       canUseCalculatedMetrics: true,
       canUsePatchRows: true,
       canUseAppendRows: true,
       canUseCustomLogo: true,
       canCreateSectors: true,
+      canUseDatabaseConnections: false,
+      requiresDedicatedInfra: false,
       isDefault: false,
       isActive: true,
       sortOrder: 30
     }
+    // Corporate fica reservado para uma fase futura. A estrutura existe,
+    // mas o plano nao deve aparecer nem ser ofertado por enquanto.
   ];
   const permissions = [
     ['Visualizar dashboard', 'dashboard.view'],
@@ -93,7 +157,7 @@ async function main() {
     const { id, code, ...data } = plan;
     await prisma.plan.upsert({ where: { code }, update: data, create: { id, code, ...data } });
   }
-  await prisma.plan.updateMany({ where: { code: 'ENTERPRISE' }, data: { isActive: false } });
+  await prisma.plan.updateMany({ where: { code: { in: ['ENTERPRISE', 'CORPORATE'] } }, data: { isActive: false, isDefault: false } });
 
   const superRole = await prisma.role.upsert({ where: { code: 'SUPER_ADMIN' }, update: {}, create: { name: 'Super Admin', code: 'SUPER_ADMIN', description: 'Administrador global do SaaS' } });
   const orgAdminRole = await prisma.role.upsert({ where: { code: 'ORG_ADMIN' }, update: {}, create: { name: 'Admin da Organização', code: 'ORG_ADMIN', description: 'Administrador da organização' } });

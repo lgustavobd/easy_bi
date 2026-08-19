@@ -19,6 +19,7 @@ function formatLimit(value: any) {
 }
 
 function formatPlanPrice(plan: any) {
+  if (plan?.priceLabel && Number(plan?.monthlyPrice || 0) === 0) return plan.priceLabel;
   if (plan?.monthlyPrice === null || plan?.monthlyPrice === undefined) return plan?.priceLabel || 'Sob consulta';
   return `${Number(plan.monthlyPrice).toLocaleString('pt-BR', { style: 'currency', currency: plan.currency || 'BRL' })}/mes`;
 }
@@ -447,7 +448,13 @@ export function OrganizationsPage() {
                     </div>
                     <p className="mt-1 font-black text-slate-800">{org.plan?.name || 'Sem plano'}</p>
                     {org.plan && <p className="mt-1 text-sm font-black text-primary">{formatPlanPrice(org.plan)}</p>}
-                    {org.plan?.limits && <p className="mt-1 text-xs font-bold text-slate-500">{formatLimit(org.plan.limits.maxUsers)} usuarios · {formatLimit(org.plan.limits.maxDatasets)} datasets · {formatLimit(org.plan.limits.maxDashboards)} dashboards</p>}
+                    {org.plan?.limits && (
+                      <p className="mt-1 text-xs font-bold text-slate-500">
+                        {formatLimit(org.plan.limits.maxUsers)} usuarios · {formatLimit(org.plan.limits.maxDatasets)} bases · {formatLimit(org.plan.limits.maxDashboards)} dashboards
+                        {org.plan.limits.maxTotalRows !== null && org.plan.limits.maxTotalRows !== undefined ? ` · ${formatLimit(org.plan.limits.maxTotalRows)} linhas totais` : ''}
+                      </p>
+                    )}
+                    {org.accessExpiresAt && <p className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-xs font-black text-amber-700">Acesso ate {new Date(org.accessExpiresAt).toLocaleDateString('pt-BR')}</p>}
                   </div>
                   <div className="mt-5 rounded-2xl bg-slate-50 p-3">
                     <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Tema</span>

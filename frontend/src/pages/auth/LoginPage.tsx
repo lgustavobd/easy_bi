@@ -8,42 +8,63 @@ import { Logo } from '../../components/Logo';
 import { useAuthStore } from '../../store/auth.store';
 
 function planPrice(plan: any) {
+  if (plan?.priceLabel && Number(plan?.monthlyPrice || 0) === 0) return plan.priceLabel;
   if (plan?.monthlyPrice === null || plan?.monthlyPrice === undefined) return plan?.priceLabel || 'Sob consulta';
   return Number(plan.monthlyPrice).toLocaleString('pt-BR', { style: 'currency', currency: plan.currency || 'BRL' });
 }
 
 const fallbackShowcasePlans = [
   {
+    id: 'free-preview',
+    name: 'Free',
+    monthlyPrice: 0,
+    priceLabel: 'Gratis',
+    currency: 'BRL',
+    trialDays: 7,
+    limits: { maxUsers: 1, maxDatasets: 2, maxDashboards: 1, maxTotalRows: 200 },
+    features: { canUsePatchRows: true }
+  },
+  {
     id: 'starter-preview',
     name: 'Starter',
     monthlyPrice: 148.5,
     currency: 'BRL',
-    limits: { maxUsers: 1, maxDatasets: 5, maxDashboards: 3, maxRowsPerDataset: 2000 },
-    features: { canUseAppendRows: true }
+    limits: { maxUsers: 1, maxDatasets: 5, maxDashboards: 3, maxTotalRows: 2000 },
+    features: { canUsePatchRows: true }
+  },
+  {
+    id: 'essential-preview',
+    name: 'Essencial',
+    monthlyPrice: 249,
+    currency: 'BRL',
+    limits: { maxUsers: 3, maxDatasets: 8, maxDashboards: 5, maxTotalRows: 5000 },
+    features: { canExportCharts: true, canUseCalculatedMetrics: true, canUsePatchRows: true, canUseAppendRows: true, canCreateSectors: true }
   },
   {
     id: 'pro-preview',
     name: 'Pro',
     monthlyPrice: 373.5,
     currency: 'BRL',
-    limits: { maxUsers: 5, maxDatasets: 20, maxDashboards: 10, maxRowsPerDataset: 5000 },
-    features: { canExportCharts: true, canUseCalculatedMetrics: true, canUseAppendRows: true }
+    limits: { maxUsers: 5, maxDatasets: 25, maxDashboards: 15, maxTotalRows: 5000 },
+    features: { canExportCharts: true, canUseCalculatedMetrics: true, canUsePatchRows: true, canUseAppendRows: true, canCreateSectors: true }
   },
   {
     id: 'business-preview',
     name: 'Business',
     monthlyPrice: 748.5,
     currency: 'BRL',
-    limits: { maxUsers: 10, maxDatasets: 60, maxDashboards: 30, maxRowsPerDataset: 11000 },
-    features: { canExportCharts: true, canUseCalculatedMetrics: true, canUsePatchRows: true, canUseCustomLogo: true }
+    limits: { maxUsers: 10, maxDatasets: 100, maxDashboards: 60, maxTotalRows: 11000 },
+    features: { canExportCharts: true, canUseCalculatedMetrics: true, canUsePatchRows: true, canUseAppendRows: true, canUseCustomLogo: true, canCreateSectors: true }
   }
 ];
 
 function planSummary(plan: any) {
+  const trial = plan?.trialDays ? `${plan.trialDays} dias de teste` : null;
   const users = plan?.limits?.maxUsers ? `${plan.limits.maxUsers} usuarios` : 'Usuarios ilimitados';
+  const datasets = plan?.limits?.maxDatasets ? `${plan.limits.maxDatasets} bases` : 'Bases ilimitadas';
   const dashboards = plan?.limits?.maxDashboards ? `${plan.limits.maxDashboards} dashboards` : 'Dashboards ilimitados';
-  const rows = plan?.limits?.maxRowsPerDataset ? `${Number(plan.limits.maxRowsPerDataset).toLocaleString('pt-BR')} linhas/dataset` : 'Linhas ilimitadas';
-  return [users, dashboards, rows];
+  const rows = plan?.limits?.maxTotalRows ? `${Number(plan.limits.maxTotalRows).toLocaleString('pt-BR')} linhas totais` : 'Linhas totais ilimitadas';
+  return [trial, users, datasets, dashboards, rows].filter(Boolean);
 }
 
 function planHighlights(plan: any) {
@@ -52,9 +73,11 @@ function planHighlights(plan: any) {
     features.canUseCalculatedMetrics && 'Metricas calculadas',
     features.canUsePatchRows && 'Atualizacao por linhas',
     features.canUseAppendRows && 'Inclusao de dados',
-    features.canExportCharts && 'Exportacao de graficos',
+    features.canExportCharts && 'Exportacao de graficos e dashboards',
     features.canUseCustomLogo && 'Logo personalizado',
-    features.canCreateSectors && 'Setores extras'
+    features.canCreateSectors && 'Setores extras',
+    features.canUseDatabaseConnections && 'Conexao com bancos',
+    plan?.requiresDedicatedInfra && 'Infra apartada'
   ].filter(Boolean).slice(0, 3);
 }
 
@@ -80,11 +103,22 @@ export function LoginPage() {
     message: ''
   });
   const { data: publicPlans = [] } = useQuery({ queryKey: ['public-plans'], queryFn: api.plans.publicList });
-  const showcasePlans = (publicPlans.length ? publicPlans : fallbackShowcasePlans).slice(0, 3);
+  const showcasePlans = (publicPlans.length ? publicPlans : fallbackShowcasePlans).slice(0, 6);
+  const planCount = Math.max(showcasePlans.length, 1);
+  const [activePlanIndex, setActivePlanIndex] = useState(0);
 
   useEffect(() => {
     document.documentElement.dataset.accent = 'ORANGE';
   }, []);
+
+  useEffect(() => {
+    setActivePlanIndex(0);
+    if (showcasePlans.length <= 1) return;
+    const timer = window.setInterval(() => {
+      setActivePlanIndex(current => (current + 1) % showcasePlans.length);
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [showcasePlans.length]);
 
   useEffect(() => {
     if (!requestForm.requestedPlanId && publicPlans.length) {
@@ -209,9 +243,9 @@ export function LoginPage() {
         .easy-login-form-card {
           width: 100%;
           max-width: 410px;
-          align-self: start;
+          align-self: center;
           justify-self: center;
-          padding-top: clamp(18px, 4.8vh, 52px);
+          padding-top: 0;
         }
 
         .easy-login-secure {
@@ -387,12 +421,13 @@ export function LoginPage() {
         .easy-login-carousel-track {
           display: flex;
           height: 100%;
-          width: 300%;
-          animation: easyPlanCarousel 14s cubic-bezier(.72, 0, .28, 1) infinite;
+          width: calc(var(--plan-count, 3) * 100%);
+          transition: transform 720ms cubic-bezier(.72, 0, .28, 1);
+          will-change: transform;
         }
 
         .easy-login-plan-slide {
-          width: 33.333%;
+          width: calc(100% / var(--plan-count, 3));
           height: 100%;
           min-height: 0;
           display: grid;
@@ -833,7 +868,7 @@ export function LoginPage() {
           height: 100%;
           overflow: hidden;
           display: grid;
-          grid-template-columns: minmax(0, 1.2fr) minmax(250px, 0.8fr);
+          grid-template-columns: minmax(0, 1.18fr) minmax(250px, 0.82fr);
           gap: 16px;
           align-items: stretch;
         }
@@ -915,9 +950,54 @@ export function LoginPage() {
         .easy-login-bars span:nth-child(7) { animation-delay: .6s; }
         .easy-login-bars span:nth-child(8) { animation-delay: .7s; }
 
+        .easy-login-panel-sparks {
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 9px;
+          margin-top: 12px;
+        }
+
+        .easy-login-spark-tile {
+          min-width: 0;
+          border: 1px solid rgba(255,255,255,0.16);
+          border-radius: 16px;
+          padding: 10px;
+          background: rgba(255,255,255,0.09);
+        }
+
+        .easy-login-spark-tile strong {
+          display: block;
+          color: white;
+          font-size: 12px;
+          font-weight: 950;
+        }
+
+        .easy-login-spark-tile span {
+          display: block;
+          margin-top: 4px;
+          color: rgba(226,232,240,0.72);
+          font-size: 10px;
+          font-weight: 850;
+        }
+
+        .easy-login-spark-track {
+          height: 5px;
+          margin-top: 8px;
+          overflow: hidden;
+          border-radius: 999px;
+          background: rgba(255,255,255,0.16);
+        }
+
+        .easy-login-spark-track i {
+          display: block;
+          height: 100%;
+          border-radius: inherit;
+          background: linear-gradient(90deg, #fff7ed, #fed7aa, #ffffff);
+        }
+
         .easy-login-mini-grid {
           display: grid;
-          grid-template-rows: auto minmax(76px, 0.72fr) minmax(92px, 1fr);
+          grid-template-rows: auto minmax(66px, 0.58fr) minmax(82px, 0.84fr) auto;
           gap: 12px;
           height: 100%;
           min-height: 0;
@@ -1029,6 +1109,62 @@ export function LoginPage() {
           animation: easyDonutGlow 3.4s ease-in-out infinite;
         }
 
+        .easy-login-extra-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 12px;
+          min-height: 0;
+        }
+
+        .easy-login-tiny-chart {
+          min-height: 64px;
+          overflow: hidden;
+          border: 1px solid rgba(255, 255, 255, 0.16);
+          border-radius: 18px;
+          padding: 10px;
+          background: rgba(255,255,255,0.1);
+          backdrop-filter: blur(18px);
+        }
+
+        .easy-login-tiny-chart strong {
+          display: block;
+          color: white;
+          font-size: 12px;
+          font-weight: 950;
+        }
+
+        .easy-login-tiny-bars {
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          align-items: end;
+          gap: 5px;
+          height: 34px;
+          margin-top: 8px;
+        }
+
+        .easy-login-tiny-bars span {
+          border-radius: 999px 999px 6px 6px;
+          background: linear-gradient(180deg, #fff7ed, #fed7aa);
+        }
+
+        .easy-login-tiny-area {
+          width: 100%;
+          height: 42px;
+          margin-top: 4px;
+          display: block;
+        }
+
+        .easy-login-tiny-area path:first-child {
+          fill: rgba(255,255,255,0.18);
+        }
+
+        .easy-login-tiny-area path:last-child {
+          fill: none;
+          stroke: #fff7ed;
+          stroke-width: 4;
+          stroke-linecap: round;
+        }
+
         .easy-login-mix-card strong {
           display: block;
           color: white;
@@ -1043,13 +1179,6 @@ export function LoginPage() {
           font-size: 12px;
           line-height: 1.5;
           font-weight: 800;
-        }
-
-        @keyframes easyPlanCarousel {
-          0%, 27% { transform: translateX(0); }
-          33%, 60% { transform: translateX(-33.333%); }
-          66%, 93% { transform: translateX(-66.666%); }
-          100% { transform: translateX(0); }
         }
 
         @keyframes easyLoginShimmer {
@@ -1149,7 +1278,7 @@ export function LoginPage() {
 
             <h2 className="easy-login-title">Entrar no Easy BI</h2>
             <p className="easy-login-copy">
-              Acesse seu workspace para acompanhar datasets, metricas e dashboards da sua operacao.
+              Acesse seu workspace para acompanhar bases de dados, metricas e dashboards da sua operacao.
             </p>
 
             <form onSubmit={handleSubmit}>
@@ -1220,7 +1349,13 @@ export function LoginPage() {
             </div>
 
             <div className="easy-login-plan-carousel" aria-label="Planos Easy BI">
-              <div className="easy-login-carousel-track">
+              <div
+                className="easy-login-carousel-track"
+                style={{
+                  '--plan-count': planCount,
+                  transform: `translateX(-${activePlanIndex * (100 / planCount)}%)`
+                } as any}
+              >
                 {showcasePlans.map((plan: any, index: number) => {
                   const highlights = planHighlights(plan);
                   return (
@@ -1236,7 +1371,7 @@ export function LoginPage() {
                           {planSummary(plan).map(item => <span key={item}>{item}</span>)}
                         </div>
                         <div className="easy-login-plan-features">
-                          {(highlights.length ? highlights : ['Dashboards essenciais', 'Datasets organizados']).map((item: any) => (
+                          {(highlights.length ? highlights : ['Dashboards essenciais', 'Bases organizadas']).map((item: any) => (
                             <span key={item}>+ {item}</span>
                           ))}
                         </div>
@@ -1274,6 +1409,21 @@ export function LoginPage() {
                     <span key={height} style={{ height: `${height}%` }} />
                   ))}
                 </div>
+                <div className="easy-login-panel-sparks" aria-hidden="true">
+                  {[
+                    { label: 'Leads', value: '82%', progress: 82 },
+                    { label: 'Receita', value: '76%', progress: 76 },
+                    { label: 'Meta', value: '91%', progress: 91 },
+                  ].map((item) => (
+                    <div key={item.label} className="easy-login-spark-tile">
+                      <strong>{item.value}</strong>
+                      <span>{item.label}</span>
+                      <div className="easy-login-spark-track">
+                        <i style={{ width: `${item.progress}%` }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
 
               <div className="easy-login-mini-grid">
@@ -1286,7 +1436,7 @@ export function LoginPage() {
                   <div className="easy-login-mini-card">
                     <Database size={20} />
                     <strong>12</strong>
-                    <span>datasets monitorados</span>
+                    <span>bases monitoradas</span>
                   </div>
                 </div>
 
@@ -1303,6 +1453,24 @@ export function LoginPage() {
 
                 <div className="easy-login-chart-card easy-login-mix-card">
                   <div className="easy-login-donut">72%</div>
+                </div>
+
+                <div className="easy-login-extra-grid" aria-hidden="true">
+                  <div className="easy-login-tiny-chart">
+                    <strong>Conversao</strong>
+                    <div className="easy-login-tiny-bars">
+                      {[38, 54, 71, 86].map((height) => (
+                        <span key={height} style={{ height: `${height}%` }} />
+                      ))}
+                    </div>
+                  </div>
+                  <div className="easy-login-tiny-chart">
+                    <strong>Retencao</strong>
+                    <svg className="easy-login-tiny-area" viewBox="0 0 120 48" preserveAspectRatio="none">
+                      <path d="M0 38 C18 24 26 30 42 20 C58 10 72 18 86 12 C102 6 112 12 120 8 L120 48 L0 48 Z" />
+                      <path d="M0 38 C18 24 26 30 42 20 C58 10 72 18 86 12 C102 6 112 12 120 8" />
+                    </svg>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1389,7 +1557,7 @@ export function LoginPage() {
                     <label className="easy-login-label">
                       Plano desejado
                       <select className="easy-login-select" value={requestForm.requestedPlanId} onChange={e => patchRequest({ requestedPlanId: e.target.value })}>
-                        {publicPlans.map((plan: any) => <option key={plan.id} value={plan.id}>{plan.name} - {planPrice(plan)}/mes</option>)}
+                        {publicPlans.map((plan: any) => <option key={plan.id} value={plan.id}>{plan.name} - {planPrice(plan)}</option>)}
                       </select>
                     </label>
                     <label className="easy-login-label full">

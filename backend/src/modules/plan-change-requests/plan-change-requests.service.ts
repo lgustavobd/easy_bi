@@ -71,7 +71,13 @@ export class PlanChangeRequestsService {
 
     if (dto.status === 'APPROVED') {
       await this.plans.assertOrganizationFitsPlan(request.organizationId, request.requestedPlanId, 'aprovar esta troca de plano');
-      await this.prisma.organization.update({ where: { id: request.organizationId }, data: { planId: request.requestedPlanId } });
+      await this.prisma.organization.update({
+        where: { id: request.organizationId },
+        data: {
+          planId: request.requestedPlanId,
+          accessExpiresAt: this.plans.accessExpirationForPlan(request.requestedPlan)
+        }
+      });
     }
 
     const reviewed = await this.prisma.planChangeRequest.update({

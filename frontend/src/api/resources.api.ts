@@ -50,6 +50,8 @@ export const api = {
     rows: async (id: string, params: any = {}) => (await http.get(`/datasets/${id}/rows`, { params })).data,
     upload: async (form: FormData) => (await http.post('/datasets/upload', form, { headers: { 'Content-Type': 'multipart/form-data' } })).data,
     workbookSheets: async (form: FormData) => (await http.post('/datasets/workbook-sheets', form, { headers: { 'Content-Type': 'multipart/form-data' } })).data,
+    createJoinModel: async (payload: any) => (await http.post('/datasets/join-model', payload)).data,
+    reloadJoinModel: async (id: string) => (await http.post(`/datasets/${id}/reload-join-model`)).data,
     ensureImportTemplate: async (id: string) => (await http.post(`/datasets/${id}/import-template`)).data,
     replaceFile: async (id: string, form: FormData) => (await http.post(`/datasets/${id}/replace-file`, form, { headers: { 'Content-Type': 'multipart/form-data' } })).data,
     appendFile: async (id: string, form: FormData) => (await http.post(`/datasets/${id}/append-file`, form, { headers: { 'Content-Type': 'multipart/form-data' } })).data,

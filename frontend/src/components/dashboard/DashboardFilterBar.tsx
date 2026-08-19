@@ -360,7 +360,7 @@ export function DashboardFilterBar({ dataset, filters, onChange, compact, readOn
           <div className="rounded-xl bg-slate-100 p-2.5 text-slate-500"><Filter size={18} /></div>
           <div>
             <p className="font-black text-slate-800">Filtros do dashboard</p>
-            <p className="text-xs font-medium text-slate-500">Escolha um dataset unico para liberar filtros interativos.</p>
+            <p className="text-xs font-medium text-slate-500">Escolha uma base de dados unica para liberar filtros interativos.</p>
           </div>
         </div>
       </section>
@@ -374,7 +374,7 @@ export function DashboardFilterBar({ dataset, filters, onChange, compact, readOn
           <div className="rounded-xl bg-primary-soft p-2.5 text-primary"><Filter size={18} /></div>
           <div>
             <p className="font-black text-slate-950">Filtros interativos</p>
-            <p className="text-xs font-medium text-slate-500">Filtros globais usando somente o dataset <strong>{dataset.name}</strong>.</p>
+            <p className="text-xs font-medium text-slate-500">Filtros globais usando somente a base <strong>{dataset.name}</strong>.</p>
           </div>
         </div>
         <div className="flex flex-wrap gap-2">

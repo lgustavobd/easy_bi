@@ -5,11 +5,13 @@ import GridLayout, { WidthProvider } from 'react-grid-layout';
 import type { Layout } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
-import { ArrowLeft, Database, Edit3, Loader2, Maximize2, Minimize2 } from 'lucide-react';
+import { ArrowLeft, Download, Edit3, Loader2, Maximize2, Minimize2 } from 'lucide-react';
 import { api } from '../../api/resources.api';
 import { ChartRenderer, FilterRule } from '../../components/dashboard/ChartRenderer';
 import { DashboardFilterDock } from '../../components/dashboard/DashboardFilterDock';
+import { exportDashboardAsHtml } from '../../components/dashboard/export-widget';
 import { useAuthStore } from '../../store/auth.store';
+import { planFeature } from '../../utils/plan';
 
 const ResponsiveGridLayout = WidthProvider(GridLayout);
 
@@ -149,6 +151,7 @@ export function DashboardViewPage() {
   const user = useAuthStore(s => s.user);
   const organization = useAuthStore(s => s.organization);
   const pageRef = useRef<HTMLDivElement | null>(null);
+  const exportRef = useRef<HTMLElement | null>(null);
   const [filters, setFilters] = useState<FilterRule[]>([]);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const { data: datasets = [], isLoading: loadingDatasets } = useQuery({ queryKey: ['datasets'], queryFn: api.datasets.list });
@@ -159,6 +162,7 @@ export function DashboardViewPage() {
   const widgets = useMemo(() => (dashboard?.widgets || []).map((widget: any) => normalizeWidget(widget, dataset)), [dashboard, dataset]);
   const layout: Layout[] = useMemo(() => widgets.map((widget: any) => ({ i: widget.id, x: widget.x, y: widget.y, w: widget.w, h: widget.h, static: true })), [widgets]);
   const datasetFilters = filters.filter((filter) => dataset?.id && (!filter.datasetId || filter.datasetId === dataset.id));
+  const canExportDashboard = planFeature(organization, 'canExportCharts');
 
   useEffect(() => {
     const savedFilters = ((dashboard?.filterConfig as any)?.filters || []).filter((filter: FilterRule) => dataset?.id && (!filter.datasetId || filter.datasetId === dataset.id));
@@ -192,6 +196,17 @@ export function DashboardViewPage() {
     if (request) await request.call(target);
   }
 
+  function exportDashboard() {
+    if (!canExportDashboard || !widgets.length) return;
+    exportDashboardAsHtml(
+      exportRef.current,
+      { name: dashboard?.name, description: dashboard?.description },
+      dataset,
+      datasetFilters,
+      widgets.length
+    );
+  }
+
   if (loadingDatasets || loadingDashboard) {
     return <div className="card-premium flex items-center gap-3 p-6 text-sm font-bold text-slate-500"><Loader2 className="animate-spin" size={18} /> Carregando dashboard...</div>;
   }
@@ -206,6 +221,10 @@ export function DashboardViewPage() {
           <p>Ambiente de analise com filtros interativos. Para mover, redimensionar ou alterar metricas, acesse o editor.</p>
         </div>
         <div className="selection-hero-actions">
+          <button className="dashboard-gallery-new-btn selection-hero-dark-btn disabled:cursor-not-allowed disabled:opacity-50" disabled={!canExportDashboard || !widgets.length} title={canExportDashboard ? 'Exportar dashboard em HTML com filtros aplicados' : 'Exportacao bloqueada pelo plano'} onClick={exportDashboard}>
+            <Download size={16} />
+            Exportar dashboard
+          </button>
           <button className="dashboard-gallery-new-btn selection-hero-dark-btn" onClick={toggleFullscreen}>
             {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
             {isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'}
@@ -214,20 +233,9 @@ export function DashboardViewPage() {
         </div>
       </section>
 
-      <section className="card-premium flex flex-wrap items-center justify-between gap-3 p-4">
-        <div className="flex items-center gap-3">
-          <div className="rounded-xl bg-slate-950 p-2.5 text-white"><Database size={18} /></div>
-          <div>
-            <p className="font-black text-slate-950">Dataset da análise</p>
-            <p className="text-xs font-medium text-slate-500">{dataset?.name || 'Nenhum dataset vinculado'} · todos os gráficos e filtros usam essa mesma origem.</p>
-          </div>
-        </div>
-        <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-500">{Number(dataset?.rowCount || 0).toLocaleString('pt-BR')} linhas</span>
-      </section>
-
       <div className="dashboard-workbench">
         <div className="dashboard-workbench-main">
-          <section className="dashboard-canvas">
+          <section ref={exportRef} className="dashboard-canvas">
         {!widgets.length ? (
           <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-8 text-center text-sm font-bold text-slate-500">Esse dashboard ainda não possui gráficos salvos.</div>
         ) : (

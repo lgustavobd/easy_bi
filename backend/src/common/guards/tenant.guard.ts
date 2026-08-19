@@ -26,9 +26,21 @@ export class TenantGuard implements CanActivate {
 
     const membership = await this.prisma.userOrganization.findUnique({
       where: { userId_organizationId: { userId: user.id, organizationId: String(organizationId) } },
-      include: { role: true }
+      include: {
+        role: true,
+        organization: { select: { id: true, name: true, status: true, deletedAt: true, accessExpiresAt: true } }
+      }
     });
     if (!membership || membership.status !== 'ACTIVE') throw new ForbiddenException('Usuario sem acesso a esta organizacao.');
+    if (!membership.organization || membership.organization.deletedAt || membership.organization.status !== 'ACTIVE') {
+      throw new ForbiddenException('Organizacao inativa ou bloqueada.');
+    }
+    if (membership.organization.accessExpiresAt) {
+      const expiresAt = new Date(membership.organization.accessExpiresAt);
+      if (expiresAt.getTime() <= Date.now()) {
+        throw new ForbiddenException(`Acesso de teste da organizacao ${membership.organization.name} expirou em ${expiresAt.toLocaleDateString('pt-BR')}. Entre em contato com o Admin do sistema para renovar ou melhorar o plano.`);
+      }
+    }
     req.organizationId = String(organizationId);
     req.membership = membership;
     return true;

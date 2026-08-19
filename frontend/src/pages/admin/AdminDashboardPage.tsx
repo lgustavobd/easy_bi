@@ -79,19 +79,19 @@ export function AdminDashboardPage() {
             <SaasMetricCard title="Organizacoes" value={summary.organizations.total} detail={`${formatNumber(summary.organizations.active)} ativas - ${formatNumber(summary.organizations.inactive)} inativas`} icon={Building2} />
             <SaasMetricCard title="Usuarios" value={summary.users.total} detail={`${formatNumber(summary.users.active)} ativos - ${formatNumber(summary.users.activeLast30Days)} logaram em 30 dias`} icon={Users} />
             <SaasMetricCard title="Dashboards" value={summary.dashboards.total} detail={`${formatNumber(summary.dashboards.published)} publicados - ${formatNumber(summary.dashboards.widgets)} widgets`} icon={LayoutDashboard} />
-            <SaasMetricCard title="Datasets" value={summary.datasets.total} detail={`${formatNumber(summary.datasets.rows)} linhas importadas - ${formatNumber(summary.datasets.ready)} prontos`} icon={Database} />
+            <SaasMetricCard title="Bases de dados" value={summary.datasets.total} detail={`${formatNumber(summary.datasets.rows)} linhas importadas - ${formatNumber(summary.datasets.ready)} prontas`} icon={Database} />
             <SaasMetricCard title="Vinculos ativos" value={summary.users.activeMemberships} detail="usuarios vinculados a organizacoes" icon={Activity} />
             <SaasMetricCard title="Modelos" value={summary.templates.total} detail="modelos reutilizaveis criados" icon={Layers3} />
             <SaasMetricCard title="Auditoria 30d" value={summary.activity.auditLast30Days} detail="eventos recentes no sistema" icon={BarChart3} />
             <SaasMetricCard title="Receita mensal" value={monthlyRevenue} detail="MRR estimado pelos planos ativos" icon={BarChart3} money />
-            <SaasMetricCard title="Falhas dataset" value={summary.datasets.failed} detail="cargas com erro para acompanhar" icon={Database} />
+            <SaasMetricCard title="Falhas nas bases" value={summary.datasets.failed} detail="cargas com erro para acompanhar" icon={Database} />
           </section>
 
           <section className="card-premium overflow-hidden">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-5">
               <div>
                 <p className="text-lg font-black text-slate-950">Uso por organizacao</p>
-                <p className="text-sm font-semibold text-slate-500">Ranking operacional: usuarios, datasets, dashboards, linhas e ultima atividade.</p>
+                <p className="text-sm font-semibold text-slate-500">Ranking operacional: usuarios, bases de dados, dashboards, linhas e ultima atividade.</p>
               </div>
               <span className="rounded-full bg-primary-soft px-3 py-1 text-xs font-black text-primary">{formatNumber(usage.length)} orgs</span>
             </div>
@@ -103,7 +103,7 @@ export function AdminDashboardPage() {
                     <th className="px-5 py-3">Plano</th>
                     <th className="px-5 py-3">Status</th>
                     <th className="px-5 py-3">Usuarios</th>
-                    <th className="px-5 py-3">Datasets</th>
+                    <th className="px-5 py-3">Bases</th>
                     <th className="px-5 py-3">Dashboards</th>
                     <th className="px-5 py-3">Linhas</th>
                     <th className="px-5 py-3">Eventos</th>

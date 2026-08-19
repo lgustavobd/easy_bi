@@ -9,6 +9,7 @@ import { FileParserService } from './services/file-parser.service';
 import { PlansService } from '../plans/plans.service';
 
 const ROW_INSERT_CHUNK_SIZE = Number(process.env.DATASET_INSERT_CHUNK_SIZE || 2000);
+const JOIN_MODEL_HARD_ROW_LIMIT = Number(process.env.DATASET_JOIN_MODEL_MAX_ROWS || 250000);
 const CALCULATED_COLUMN_FLAG = 'calculatedMetric';
 const DATE_DERIVED_COLUMN_FLAG = 'dateDerivedColumn';
 
@@ -21,6 +22,26 @@ type CalculatedMetricRule = {
 type DateDerivedColumnInfo = {
   sourceColumn: string;
   grain: 'month' | 'year';
+};
+
+type JoinSource = 'primary' | 'secondary';
+
+type JoinColumnSelection = {
+  source?: JoinSource;
+  dataset?: JoinSource;
+  column?: string;
+  name?: string;
+  alias?: string;
+};
+
+type JoinModelPayload = {
+  name?: string;
+  primaryDatasetId?: string;
+  secondaryDatasetId?: string;
+  primaryKey?: string;
+  secondaryKey?: string;
+  joinType?: 'LEFT' | 'INNER' | string;
+  selectedColumns?: JoinColumnSelection[];
 };
 
 @Injectable()
@@ -130,6 +151,218 @@ export class DatasetsService {
     } finally {
       await this.removeTemporaryFile(file);
     }
+  }
+
+  async createJoinModel(payload: JoinModelPayload, organizationId: string, user: any) {
+    const datasetName = this.normalizeDatasetName(payload?.name || '');
+    if (!datasetName) throw new BadRequestException('Informe o nome da base combinada.');
+    await this.ensureDatasetNameAvailable(datasetName, organizationId);
+    await this.plans.assertCanCreateDataset(organizationId);
+
+    const primaryDatasetId = String(payload?.primaryDatasetId || '').trim();
+    const secondaryDatasetId = String(payload?.secondaryDatasetId || '').trim();
+    const primaryKey = String(payload?.primaryKey || '').trim();
+    const secondaryKey = String(payload?.secondaryKey || '').trim();
+    const joinType = String(payload?.joinType || 'LEFT').toUpperCase() === 'INNER' ? 'INNER' : 'LEFT';
+
+    if (!primaryDatasetId || !secondaryDatasetId) throw new BadRequestException('Escolha as duas bases que serao combinadas.');
+    if (primaryDatasetId === secondaryDatasetId) throw new BadRequestException('Escolha duas bases diferentes para criar o join.');
+    if (!primaryKey || !secondaryKey) throw new BadRequestException('Escolha a coluna-chave em cada base.');
+
+    const sectorIds = await getAccessibleSectorIds(this.prisma, user, organizationId);
+    if (!sectorIds.length) throw new NotFoundException('Base de dados nao encontrada.');
+
+    const [primaryDataset, secondaryDataset] = await Promise.all([
+      this.findDatasetForJoin(primaryDatasetId, organizationId, sectorIds),
+      this.findDatasetForJoin(secondaryDatasetId, organizationId, sectorIds)
+    ]);
+
+    if (!primaryDataset || !secondaryDataset) throw new NotFoundException('Uma das bases selecionadas nao foi encontrada ou esta fora do seu acesso.');
+    const primaryColumns = primaryDataset.columns || [];
+    const secondaryColumns = secondaryDataset.columns || [];
+    if (!primaryColumns.some((column: any) => column.name === primaryKey)) throw new BadRequestException('A coluna-chave da base principal nao existe.');
+    if (!secondaryColumns.some((column: any) => column.name === secondaryKey)) throw new BadRequestException('A coluna-chave da base relacionada nao existe.');
+
+    const selections = this.resolveJoinSelections(payload?.selectedColumns, primaryDataset, secondaryDataset, primaryKey, secondaryKey);
+    if (!selections.length) throw new BadRequestException('Escolha pelo menos uma coluna para compor a base combinada.');
+
+    const { joinedRows, matchedRows } = this.buildJoinedRows(selections, primaryDataset, secondaryDataset, primaryKey, secondaryKey, joinType);
+
+    if (!joinedRows.length) throw new BadRequestException('O join nao gerou linhas. Revise as chaves escolhidas ou use o tipo "Manter todos da base principal".');
+    await this.plans.assertDatasetRows(organizationId, joinedRows.length);
+
+    const columns = this.buildJoinColumns(selections, joinedRows);
+    let dataset: any = null;
+
+    try {
+      dataset = await this.prisma.dataset.create({
+        data: {
+          organizationId,
+          sectorId: primaryDataset.sectorId,
+          createdByUserId: user.id,
+          name: datasetName,
+          originalFileName: `${datasetName}.join`,
+          fileType: 'CSV',
+          storagePath: null,
+          rowCount: joinedRows.length,
+          status: 'READY',
+          metadata: {
+            kind: 'JOIN_MODEL',
+            source: 'join_model',
+            preview: joinedRows.slice(0, 10),
+            columns: columns.length,
+            inferredAt: new Date().toISOString(),
+            joinConfig: {
+              primaryDatasetId,
+              secondaryDatasetId,
+              primaryDatasetName: primaryDataset.name,
+              secondaryDatasetName: secondaryDataset.name,
+              primaryKey,
+              secondaryKey,
+              joinType,
+              matchedRows,
+              selectedColumns: selections.map((selection) => ({
+                source: selection.source,
+                column: selection.column.name,
+                alias: selection.alias,
+                sourceDatasetId: selection.dataset.id
+              }))
+            }
+          }
+        }
+      });
+
+      await this.saveColumnsAndRows(dataset.id, organizationId, columns, joinedRows);
+    } catch (error) {
+      if (dataset?.id) {
+        await this.prisma.datasetRow.deleteMany({ where: { datasetId: dataset.id, organizationId } });
+        await this.prisma.datasetColumn.deleteMany({ where: { datasetId: dataset.id } });
+        await this.prisma.dataset.delete({ where: { id: dataset.id } }).catch(() => null);
+      }
+      throw error;
+    }
+
+    await this.audit.register({
+      organizationId,
+      userId: user.id,
+      action: 'dataset.join_model_created',
+      entity: 'dataset',
+      entityId: dataset.id,
+      metadata: {
+        rows: joinedRows.length,
+        columns: columns.length,
+        joinType,
+        primaryDatasetId,
+        secondaryDatasetId,
+        primaryKey,
+        secondaryKey
+      }
+    });
+
+    return this.get(dataset.id, organizationId, user);
+  }
+
+  async reloadJoinModel(id: string, organizationId: string, user: any) {
+    const sectorIds = await getAccessibleSectorIds(this.prisma, user, organizationId);
+    if (!sectorIds.length) throw new NotFoundException('Base de dados nao encontrada.');
+
+    const dataset = await this.prisma.dataset.findFirst({
+      where: { id, organizationId, deletedAt: null, sectorId: { in: sectorIds } },
+      include: { columns: { orderBy: { createdAt: 'asc' } }, sector: true }
+    });
+    if (!dataset) throw new NotFoundException('Base de dados nao encontrada.');
+    if (!this.isJoinModelDataset(dataset)) {
+      throw new BadRequestException('Esta base nao e um modelo por join. Use as opcoes normais de carga para atualizar bases importadas.');
+    }
+
+    const metadata = dataset.metadata && typeof dataset.metadata === 'object' ? dataset.metadata as any : {};
+    const joinConfig = metadata.joinConfig && typeof metadata.joinConfig === 'object' ? metadata.joinConfig : null;
+    if (!joinConfig?.primaryDatasetId || !joinConfig?.secondaryDatasetId || !joinConfig?.primaryKey || !joinConfig?.secondaryKey) {
+      throw new BadRequestException('Nao foi possivel recarregar este modelo porque a configuracao do join esta incompleta.');
+    }
+
+    const primaryDatasetId = String(joinConfig.primaryDatasetId || '').trim();
+    const secondaryDatasetId = String(joinConfig.secondaryDatasetId || '').trim();
+    const primaryKey = String(joinConfig.primaryKey || '').trim();
+    const secondaryKey = String(joinConfig.secondaryKey || '').trim();
+    const joinType = String(joinConfig.joinType || 'LEFT').toUpperCase() === 'INNER' ? 'INNER' : 'LEFT';
+    const selectedColumns = Array.isArray(joinConfig.selectedColumns) ? joinConfig.selectedColumns as JoinColumnSelection[] : undefined;
+
+    const [primaryDataset, secondaryDataset] = await Promise.all([
+      this.findDatasetForJoin(primaryDatasetId, organizationId, sectorIds),
+      this.findDatasetForJoin(secondaryDatasetId, organizationId, sectorIds)
+    ]);
+
+    if (!primaryDataset || !secondaryDataset) throw new NotFoundException('Uma das bases usadas no modelo nao foi encontrada ou esta fora do seu acesso.');
+    if (!(primaryDataset.columns || []).some((column: any) => column.name === primaryKey)) throw new BadRequestException('A coluna-chave da base principal nao existe mais.');
+    if (!(secondaryDataset.columns || []).some((column: any) => column.name === secondaryKey)) throw new BadRequestException('A coluna-chave da base relacionada nao existe mais.');
+
+    const selections = this.resolveJoinSelections(selectedColumns, primaryDataset, secondaryDataset, primaryKey, secondaryKey);
+    if (!selections.length) throw new BadRequestException('Nao ha colunas validas para recarregar este modelo.');
+
+    const { joinedRows, matchedRows } = this.buildJoinedRows(selections, primaryDataset, secondaryDataset, primaryKey, secondaryKey, joinType);
+    if (!joinedRows.length) throw new BadRequestException('O join nao gerou linhas. Revise se as bases de origem foram atualizadas corretamente.');
+    await this.plans.assertDatasetRows(organizationId, joinedRows.length, id);
+
+    const columns = this.buildJoinColumns(selections, joinedRows);
+    const refreshedAt = new Date().toISOString();
+    await this.prisma.$transaction(async (tx) => {
+      await tx.datasetRow.deleteMany({ where: { datasetId: id, organizationId } });
+      await tx.datasetColumn.deleteMany({ where: { datasetId: id } });
+      await tx.dataset.update({
+        where: { id },
+        data: {
+          rowCount: joinedRows.length,
+          status: 'READY',
+          metadata: {
+            ...metadata,
+            preview: joinedRows.slice(0, 10),
+            columns: columns.length,
+            refreshedAt,
+            reloadedAt: refreshedAt,
+            joinConfig: {
+              ...joinConfig,
+              primaryDatasetName: primaryDataset.name,
+              secondaryDatasetName: secondaryDataset.name,
+              joinType,
+              matchedRows,
+              selectedColumns: selections.map((selection) => ({
+                source: selection.source,
+                column: selection.column.name,
+                alias: selection.alias,
+                sourceDatasetId: selection.dataset.id
+              }))
+            }
+          } as any
+        }
+      });
+      await tx.datasetColumn.createMany({ data: columns.map((column) => this.columnCreateData(id, column)) });
+    }, { timeout: 120_000 });
+
+    for (let start = 0; start < joinedRows.length; start += ROW_INSERT_CHUNK_SIZE) {
+      const chunk = joinedRows.slice(start, start + ROW_INSERT_CHUNK_SIZE);
+      await this.prisma.datasetRow.createMany({
+        data: chunk.map((row, index) => ({ datasetId: id, organizationId, rowIndex: start + index + 1, data: row as any }))
+      });
+    }
+
+    await this.audit.register({
+      organizationId,
+      userId: user.id,
+      action: 'dataset.join_model_reloaded',
+      entity: 'dataset',
+      entityId: id,
+      metadata: {
+        rows: joinedRows.length,
+        columns: columns.length,
+        joinType,
+        matchedRows,
+        primaryDatasetId,
+        secondaryDatasetId
+      }
+    });
+
+    return this.get(id, organizationId, user);
   }
 
   async list(organizationId: string, user?: any, sectorId?: string) {
@@ -316,10 +549,13 @@ export class DatasetsService {
   async replaceRowsFromFile(id: string, file: Express.Multer.File, user: any, organizationId: string, sheetName?: string) {
     if (!file) throw new BadRequestException('Arquivo não enviado.');
     const dataset = await this.get(id, organizationId, user);
+    if (this.isJoinModelDataset(dataset)) {
+      throw new BadRequestException('Modelo por join nao aceita carga manual. Atualize as bases de origem e use Recarregar modelo.');
+    }
 
     try {
       const parsed = await this.parser.parse(file, { sheetName });
-      await this.plans.assertDatasetRows(organizationId, parsed.rows.length);
+      await this.plans.assertDatasetRows(organizationId, parsed.rows.length, id);
       if (!parsed.rows.length) throw new BadRequestException('Arquivo sem linhas válidas.');
 
       const template = dataset.importTemplateId ? await this.findTemplate(dataset.importTemplateId, organizationId) : null;
@@ -374,6 +610,9 @@ export class DatasetsService {
     if (!file) throw new BadRequestException('Arquivo nao enviado.');
     await this.plans.assertFeature(organizationId, 'canUseAppendRows');
     const dataset = await this.get(id, organizationId, user);
+    if (this.isJoinModelDataset(dataset)) {
+      throw new BadRequestException('Modelo por join nao aceita inclusao manual de linhas. Atualize as bases de origem e use Recarregar modelo.');
+    }
 
     try {
       const parsed = await this.parser.parse(file, { sheetName });
@@ -407,7 +646,7 @@ export class DatasetsService {
         this.prisma.datasetRow.count({ where: { datasetId: id, organizationId } })
       ]);
       const startRowIndex = Number(rowIndexAggregate._max.rowIndex || 0) + 1;
-      await this.plans.assertDatasetRows(organizationId, currentRowCount + rowsWithCalculations.length);
+      await this.plans.assertDatasetRows(organizationId, currentRowCount + rowsWithCalculations.length, id);
 
       for (let start = 0; start < rowsWithCalculations.length; start += ROW_INSERT_CHUNK_SIZE) {
         const chunk = rowsWithCalculations.slice(start, start + ROW_INSERT_CHUNK_SIZE);
@@ -465,8 +704,10 @@ export class DatasetsService {
 
   async patchRowsFromFile(id: string, file: Express.Multer.File, user: any, organizationId: string, matchColumn?: string, sheetName?: string) {
     if (!file) throw new BadRequestException('Arquivo nÃ£o enviado.');
-    await this.plans.assertFeature(organizationId, 'canUsePatchRows');
     const dataset = await this.get(id, organizationId, user);
+    if (this.isJoinModelDataset(dataset)) {
+      throw new BadRequestException('Modelo por join nao aceita atualizacao manual por chave. Atualize as bases de origem e use Recarregar modelo.');
+    }
     const normalizedMatchColumn = this.safeKey(matchColumn || '');
     if (!normalizedMatchColumn) throw new BadRequestException('Escolha uma coluna-chave para localizar as linhas que serÃ£o atualizadas.');
 
@@ -487,7 +728,7 @@ export class DatasetsService {
     try {
       const parsed = await this.parser.parse(file, { sheetName });
       if (!parsed.rows.length) throw new BadRequestException('Arquivo sem linhas vÃ¡lidas.');
-      await this.plans.assertDatasetRows(organizationId, parsed.rows.length);
+      await this.plans.assertDatasetRows(organizationId, Number(dataset.rowCount || 0), id);
 
       const normalizedRows = parsed.rows.map((row) => this.normalizeRow(row));
       const patchesByKey = new Map<string, Record<string, any>>();
@@ -667,6 +908,178 @@ export class DatasetsService {
     }
 
     return { updatedDatasets: datasets.length };
+  }
+
+  private findDatasetForJoin(id: string, organizationId: string, sectorIds: string[]) {
+    return this.prisma.dataset.findFirst({
+      where: { id, organizationId, deletedAt: null, sectorId: { in: sectorIds } },
+      include: {
+        sector: true,
+        columns: { orderBy: { createdAt: 'asc' } },
+        rows: { orderBy: { rowIndex: 'asc' } }
+      }
+    });
+  }
+
+  private isJoinModelDataset(dataset: any) {
+    const metadata = dataset?.metadata && typeof dataset.metadata === 'object' ? dataset.metadata : {};
+    return metadata.kind === 'JOIN_MODEL' || metadata.source === 'join_model';
+  }
+
+  private resolveJoinSelections(selectedColumns: JoinColumnSelection[] | undefined, primaryDataset: any, secondaryDataset: any, primaryKey: string, secondaryKey: string) {
+    const rawSelections = Array.isArray(selectedColumns) && selectedColumns.length
+      ? selectedColumns
+      : [
+          ...(primaryDataset.columns || []).map((column: any) => ({ source: 'primary' as JoinSource, column: column.name })),
+          ...(secondaryDataset.columns || [])
+            .filter((column: any) => column.name !== secondaryKey || secondaryKey !== primaryKey)
+            .map((column: any) => ({ source: 'secondary' as JoinSource, column: column.name }))
+        ];
+
+    const usedAliases = new Set<string>();
+    const selections: Array<{ source: JoinSource; dataset: any; column: any; alias: string; label: string }> = [];
+
+    for (const item of rawSelections) {
+      const source = (item.source || item.dataset) === 'secondary' ? 'secondary' : 'primary';
+      const dataset = source === 'secondary' ? secondaryDataset : primaryDataset;
+      const columnName = String(item.column || item.name || '').trim();
+      if (!columnName) continue;
+      const column = (dataset.columns || []).find((candidate: any) => candidate.name === columnName);
+      if (!column) continue;
+
+      const requestedAlias = this.safeKey(String(item.alias || ''));
+      const fallbackAlias = source === 'primary'
+        ? column.name
+        : this.safeKey(`${secondaryDataset.name}_${column.name}`) || `secundaria_${column.name}`;
+      const alias = this.uniqueJoinAlias(requestedAlias || fallbackAlias || column.name, usedAliases);
+      usedAliases.add(alias);
+      selections.push({
+        source,
+        dataset,
+        column,
+        alias,
+        label: String(item.alias || column.originalName || column.name).trim() || alias
+      });
+    }
+
+    return selections;
+  }
+
+  private uniqueJoinAlias(value: string, usedAliases: Set<string>) {
+    const base = this.safeKey(value) || 'campo';
+    let alias = base;
+    let suffix = 2;
+    while (usedAliases.has(alias)) {
+      alias = `${base}_${suffix}`;
+      suffix += 1;
+    }
+    return alias;
+  }
+
+  private projectJoinRow(selections: Array<{ source: JoinSource; column: any; alias: string }>, primaryData: Record<string, any>, secondaryData: Record<string, any> | null) {
+    const output: Record<string, any> = {};
+    for (const selection of selections) {
+      const sourceData = selection.source === 'primary' ? primaryData : secondaryData;
+      output[selection.alias] = sourceData ? sourceData[selection.column.name] ?? null : null;
+    }
+    return output;
+  }
+
+  private buildJoinedRows(
+    selections: Array<{ source: JoinSource; dataset: any; column: any; alias: string; label: string }>,
+    primaryDataset: any,
+    secondaryDataset: any,
+    primaryKey: string,
+    secondaryKey: string,
+    joinType: string
+  ) {
+    const secondaryRowsByKey = new Map<string, any[]>();
+    for (const row of secondaryDataset.rows || []) {
+      const rowData = (row.data || {}) as Record<string, any>;
+      const key = this.normalizeMatchValue(rowData[secondaryKey]);
+      if (!key) continue;
+      const bucket = secondaryRowsByKey.get(key) || [];
+      bucket.push(row);
+      secondaryRowsByKey.set(key, bucket);
+    }
+
+    const joinedRows: Record<string, any>[] = [];
+    let matchedRows = 0;
+    for (const primaryRow of primaryDataset.rows || []) {
+      const primaryData = (primaryRow.data || {}) as Record<string, any>;
+      const key = this.normalizeMatchValue(primaryData[primaryKey]);
+      const matches = key ? (secondaryRowsByKey.get(key) || []) : [];
+
+      if (matches.length) {
+        for (const secondaryRow of matches) {
+          joinedRows.push(this.projectJoinRow(selections, primaryData, (secondaryRow.data || {}) as Record<string, any>));
+          matchedRows += 1;
+          if (joinedRows.length > JOIN_MODEL_HARD_ROW_LIMIT) {
+            throw new BadRequestException(`O join gerou mais de ${JOIN_MODEL_HARD_ROW_LIMIT.toLocaleString('pt-BR')} linhas. Refine as chaves ou use bases menores.`);
+          }
+        }
+        continue;
+      }
+
+      if (joinType === 'LEFT') {
+        joinedRows.push(this.projectJoinRow(selections, primaryData, null));
+        if (joinedRows.length > JOIN_MODEL_HARD_ROW_LIMIT) {
+          throw new BadRequestException(`O join gerou mais de ${JOIN_MODEL_HARD_ROW_LIMIT.toLocaleString('pt-BR')} linhas. Refine as chaves ou use bases menores.`);
+        }
+      }
+    }
+
+    return { joinedRows, matchedRows };
+  }
+
+  private buildJoinColumns(selections: Array<{ source: JoinSource; dataset: any; column: any; alias: string; label: string }>, rows: Record<string, any>[]) {
+    return selections.map((selection) => {
+      const stats = this.joinColumnStats(rows, selection.alias);
+      const sourceFormat = selection.column.formatConfig && typeof selection.column.formatConfig === 'object' ? selection.column.formatConfig : {};
+      return {
+        name: selection.alias,
+        originalName: selection.label,
+        dataType: selection.column.dataType || 'TEXT',
+        semanticType: selection.column.semanticType || (selection.column.isMetric ? 'METRIC' : 'DIMENSION'),
+        isMetric: Boolean(selection.column.isMetric),
+        isDimension: Boolean(selection.column.isDimension),
+        isIdentifier: Boolean(selection.column.isIdentifier),
+        isNullable: stats.nullable,
+        uniqueCount: stats.uniqueCount,
+        sampleValues: stats.sampleValues,
+        confidence: Number((sourceFormat as any).confidence || 0.97),
+        formatConfig: {
+          ...sourceFormat,
+          joinModelColumn: true,
+          joinSource: selection.source,
+          sourceDatasetId: selection.dataset.id,
+          sourceDatasetName: selection.dataset.name,
+          sourceColumn: selection.column.name
+        }
+      };
+    });
+  }
+
+  private joinColumnStats(rows: Record<string, any>[], columnName: string) {
+    const unique = new Set<string>();
+    const samples: any[] = [];
+    let nullable = false;
+
+    for (const row of rows.slice(0, 5000)) {
+      const value = row[columnName];
+      if (value === null || value === undefined || value === '') {
+        nullable = true;
+        continue;
+      }
+      unique.add(String(value));
+      if (samples.length < 5 && !samples.some((sample) => String(sample) === String(value))) samples.push(value);
+    }
+
+    return {
+      nullable,
+      uniqueCount: unique.size,
+      sampleValues: samples
+    };
   }
 
   private async ensureDatasetNameAvailable(name: string, organizationId: string) {
