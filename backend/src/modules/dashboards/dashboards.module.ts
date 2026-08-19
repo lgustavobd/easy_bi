@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AuditLogsModule } from '../audit-logs/audit-logs.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { DashboardsController } from './dashboards.controller';
 import { DashboardsService } from './dashboards.service';
-@Module({ imports: [AuditLogsModule], controllers: [DashboardsController], providers: [DashboardsService] })
+@Module({ imports: [AuditLogsModule, NotificationsModule], controllers: [DashboardsController], providers: [DashboardsService] })
 export class DashboardsModule {}

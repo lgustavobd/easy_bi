@@ -13,6 +13,7 @@ type PlanFeature =
 
 type PlanLimit = 'maxUsers' | 'maxDatasets' | 'maxDashboards' | 'maxTotalRows';
 type PlanViolation = { limit: PlanLimit; current: number; max: number; label: string };
+const ACTIVE_PLAN_CODES = ['FREE', 'ESSENTIAL'];
 
 const featureLabels: Record<PlanFeature, string> = {
   canExportCharts: 'exportar graficos e dashboards',
@@ -46,7 +47,7 @@ export class PlansService {
   async list(user: any) {
     if (!user?.isSuperAdmin) throw new ForbiddenException('Apenas Super Admin pode listar planos.');
     const plans = await this.prisma.plan.findMany({
-      where: { isActive: true, code: { not: 'CORPORATE' } },
+      where: { isActive: true, code: { in: ACTIVE_PLAN_CODES } },
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }]
     });
     return plans.map((plan) => this.serialize(plan));
@@ -54,7 +55,7 @@ export class PlansService {
 
   async publicList() {
     const plans = await this.prisma.plan.findMany({
-      where: { isActive: true, code: { not: 'CORPORATE' } },
+      where: { isActive: true, code: { in: ACTIVE_PLAN_CODES } },
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }]
     });
     return plans.map((plan) => this.serialize(plan));
@@ -70,7 +71,7 @@ export class PlansService {
 
   async resolveAssignablePlanId(planId?: string | null) {
     if (!planId) return (await this.getDefaultPlan())?.id || null;
-    const plan = await this.prisma.plan.findFirst({ where: { id: planId, isActive: true } });
+    const plan = await this.prisma.plan.findFirst({ where: { id: planId, isActive: true, code: { in: ACTIVE_PLAN_CODES } } });
     if (!plan) throw new NotFoundException('Plano nao encontrado ou inativo.');
     return plan.id;
   }

@@ -3,11 +3,17 @@ import * as bcrypt from 'bcrypt';
 import { slugify } from '../../common/utils/slugify';
 import { PrismaService } from '../../database/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PlansService } from '../plans/plans.service';
 
 @Injectable()
 export class AccessRequestsService {
-  constructor(private prisma: PrismaService, private audit: AuditLogsService, private plans: PlansService) {}
+  constructor(
+    private prisma: PrismaService,
+    private audit: AuditLogsService,
+    private plans: PlansService,
+    private notifications: NotificationsService
+  ) {}
 
   async create(dto: any) {
     const requestedPlanId = dto.requestedPlanId || (await this.plans.getDefaultPlan())?.id || null;
@@ -24,6 +30,12 @@ export class AccessRequestsService {
         message: dto.message
       },
       include: { requestedPlan: true }
+    });
+    await this.notifications.notifySuperAdmins({
+      type: 'ACCESS_REQUEST_CREATED',
+      title: 'Nova solicitacao de acesso',
+      message: `${request.requesterName} solicitou acesso para ${request.companyName}.`,
+      metadata: { accessRequestId: request.id, requestedPlanId }
     });
     return this.serialize(request);
   }
@@ -133,6 +145,15 @@ export class AccessRequestsService {
       entityId: id,
       metadata: { createdUserId: approved.createdUserId, planId, accessExpiresAt }
     });
+    if (approved.createdUserId) {
+      await this.notifications.notifyUser(approved.createdUserId, {
+        organizationId: approved.createdOrganizationId,
+        type: 'ACCESS_REQUEST_APPROVED',
+        title: 'Seu acesso foi aprovado',
+        message: `O acesso da organizacao ${organizationName} foi liberado no Easy BI.`,
+        metadata: { accessRequestId: id, organizationId: approved.createdOrganizationId, planId }
+      });
+    }
     return this.serializeWithCreatedRecords(approved);
   }
 

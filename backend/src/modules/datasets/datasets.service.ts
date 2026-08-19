@@ -7,6 +7,7 @@ import { ColumnAnalyzerService } from './services/column-analyzer.service';
 import { getAccessibleSectorIds, ensureSectorAccess } from '../../common/utils/sector-access';
 import { FileParserService } from './services/file-parser.service';
 import { PlansService } from '../plans/plans.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 const ROW_INSERT_CHUNK_SIZE = Number(process.env.DATASET_INSERT_CHUNK_SIZE || 2000);
 const JOIN_MODEL_HARD_ROW_LIMIT = Number(process.env.DATASET_JOIN_MODEL_MAX_ROWS || 250000);
@@ -51,7 +52,8 @@ export class DatasetsService {
     private parser: FileParserService,
     private analyzer: ColumnAnalyzerService,
     private audit: AuditLogsService,
-    private plans: PlansService
+    private plans: PlansService,
+    private notifications: NotificationsService
   ) {}
 
   async upload(
@@ -136,6 +138,12 @@ export class DatasetsService {
         entity: 'dataset',
         entityId: dataset.id,
         metadata: { file: file.originalname, rows: rowsWithCalculations.length, columns: columns.length, parser: parsed.metadata || {}, templateId: createdTemplate?.id || options?.templateId, sectorId: sector.id }
+      });
+      await this.notifyDatasetEvent(user.id, organizationId, {
+        type: 'DATASET_UPLOADED',
+        title: 'Base importada',
+        message: `A base ${dataset.name} foi importada com ${rowsWithCalculations.length.toLocaleString('pt-BR')} linhas.`,
+        metadata: { datasetId: dataset.id, rows: rowsWithCalculations.length, columns: columns.length }
       });
 
       return { ...datasetWithColumns, importTemplate: createdTemplate };
@@ -258,6 +266,12 @@ export class DatasetsService {
         secondaryKey
       }
     });
+    await this.notifyDatasetEvent(user.id, organizationId, {
+      type: 'JOIN_MODEL_CREATED',
+      title: 'Modelo por join criado',
+      message: `O modelo ${dataset.name} foi criado com ${joinedRows.length.toLocaleString('pt-BR')} linhas combinadas.`,
+      metadata: { datasetId: dataset.id, rows: joinedRows.length, columns: columns.length, joinType }
+    });
 
     return this.get(dataset.id, organizationId, user);
   }
@@ -360,6 +374,12 @@ export class DatasetsService {
         primaryDatasetId,
         secondaryDatasetId
       }
+    });
+    await this.notifyDatasetEvent(user.id, organizationId, {
+      type: 'JOIN_MODEL_RELOADED',
+      title: 'Modelo por join recarregado',
+      message: `O modelo ${dataset.name} foi recarregado com ${joinedRows.length.toLocaleString('pt-BR')} linhas.`,
+      metadata: { datasetId: id, rows: joinedRows.length, columns: columns.length, joinType, matchedRows }
     });
 
     return this.get(id, organizationId, user);
@@ -600,6 +620,12 @@ export class DatasetsService {
       }
 
       await this.audit.register({ organizationId, userId: user.id, action: 'dataset.rows_replaced', entity: 'dataset', entityId: id, metadata: { rows: rowsWithCalculations.length, file: file.originalname, calculatedMetrics: calculatedMetrics.map((metric) => metric.name) } });
+      await this.notifyDatasetEvent(user.id, organizationId, {
+        type: 'DATASET_ROWS_REPLACED',
+        title: 'Base substituida',
+        message: `A base ${dataset.name} foi substituida com ${rowsWithCalculations.length.toLocaleString('pt-BR')} linhas.`,
+        metadata: { datasetId: id, rows: rowsWithCalculations.length, file: file.originalname }
+      });
       return this.get(id, organizationId, user);
     } finally {
       await this.removeTemporaryFile(file);
@@ -694,6 +720,12 @@ export class DatasetsService {
         entity: 'dataset',
         entityId: id,
         metadata: summary
+      });
+      await this.notifyDatasetEvent(user.id, organizationId, {
+        type: 'DATASET_ROWS_APPENDED',
+        title: 'Linhas incluidas',
+        message: `${rowsWithCalculations.length.toLocaleString('pt-BR')} linha(s) foram adicionadas na base ${dataset.name}.`,
+        metadata: { datasetId: id, ...summary }
       });
 
       return { dataset: await this.get(id, organizationId, user), summary };
@@ -844,6 +876,12 @@ export class DatasetsService {
         entityId: id,
         metadata: summary
       });
+      await this.notifyDatasetEvent(user.id, organizationId, {
+        type: 'DATASET_ROWS_PATCHED',
+        title: 'Linhas atualizadas',
+        message: `${updatedRows.toLocaleString('pt-BR')} linha(s) foram atualizadas na base ${dataset.name}.`,
+        metadata: { datasetId: id, ...summary }
+      });
 
       return { dataset: await this.get(id, organizationId, user), summary };
     } finally {
@@ -872,6 +910,12 @@ export class DatasetsService {
     await this.prisma.datasetColumn.deleteMany({ where: { datasetId: id } });
     await this.prisma.datasetColumn.createMany({ data: columns.map((column) => this.columnCreateData(id, column)) });
     await this.audit.register({ organizationId, userId: user.id, action: 'dataset.reprocessed', entity: 'dataset', entityId: id });
+    await this.notifyDatasetEvent(user.id, organizationId, {
+      type: 'DATASET_REPROCESSED',
+      title: 'Base reprocessada',
+      message: `A base ${dataset.name} foi reprocessada com as metricas calculadas atualizadas.`,
+      metadata: { datasetId: id, rows: rows.length, columns: columns.length }
+    });
     return this.get(id, organizationId, user);
   }
 
@@ -1529,6 +1573,16 @@ export class DatasetsService {
   private escapeCsv(value: string) {
     const text = String(value || '');
     return /[;"\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  }
+
+  private async notifyDatasetEvent(userId: string, organizationId: string, payload: { type: string; title: string; message: string; metadata?: Record<string, any> }) {
+    await this.notifications.notifyUser(userId, {
+      organizationId,
+      type: payload.type,
+      title: payload.title,
+      message: payload.message,
+      metadata: payload.metadata
+    });
   }
 
   private async removeTemporaryFile(file: Express.Multer.File) {

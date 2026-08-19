@@ -3,11 +3,17 @@ import * as bcrypt from 'bcrypt';
 import { ensureAtLeastOneSector, validateSectorIds } from '../../common/utils/sector-access';
 import { PrismaService } from '../../database/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PlansService } from '../plans/plans.service';
 
 @Injectable()
 export class UsersService {
-  constructor(private prisma: PrismaService, private audit: AuditLogsService, private plans: PlansService) {}
+  constructor(
+    private prisma: PrismaService,
+    private audit: AuditLogsService,
+    private plans: PlansService,
+    private notifications: NotificationsService
+  ) {}
 
   async create(dto: any, actor: any, organizationId?: string) {
     const targetOrgId = actor.isSuperAdmin ? dto.organizationId || organizationId : organizationId;
@@ -41,6 +47,13 @@ export class UsersService {
     await this.replaceUserSectors(user.id, targetOrgId, sectorIds);
 
     await this.audit.register({ organizationId: targetOrgId, userId: actor.id, action: 'user.created', entity: 'user', entityId: user.id, metadata: { role: role.code, sectors: sectorIds } });
+    await this.notifications.notifyUser(user.id, {
+      organizationId: targetOrgId,
+      type: 'USER_ACCESS_CREATED',
+      title: 'Acesso criado',
+      message: `Seu acesso ao Easy BI foi criado com o perfil ${role.name}.`,
+      metadata: { organizationId: targetOrgId, roleId: role.id, roleCode: role.code }
+    });
     return this.get(user.id, actor, targetOrgId);
   }
 
@@ -151,6 +164,13 @@ export class UsersService {
     });
 
     await this.audit.register({ organizationId: targetOrgId, userId: actor.id, action: 'user.updated', entity: 'user', entityId: id, metadata: { roleId: dto.roleId, status: dto.status, sectors: dto.sectorIds, fromOrganizationId: fromOrgId, organizationId: targetOrgId } });
+    await this.notifications.notifyUser(id, {
+      organizationId: targetOrgId,
+      type: 'USER_ACCESS_UPDATED',
+      title: 'Acesso atualizado',
+      message: 'Seu cadastro ou permissoes foram atualizados no Easy BI.',
+      metadata: { organizationId: targetOrgId, roleId: dto.roleId, status: dto.status }
+    });
     return { id: user.id, name: user.name, email: user.email, status: user.status };
   }
 
@@ -162,6 +182,13 @@ export class UsersService {
     await this.prisma.user.update({ where: { id }, data: { passwordHash: await bcrypt.hash(password, 10) } });
     await this.prisma.refreshToken.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } });
     await this.audit.register({ organizationId: targetOrgId, userId: actor.id, action: 'user.password_reset', entity: 'user', entityId: id });
+    await this.notifications.notifyUser(id, {
+      organizationId: targetOrgId,
+      type: 'USER_PASSWORD_RESET',
+      title: 'Senha redefinida',
+      message: 'Sua senha foi redefinida por um administrador.',
+      metadata: { organizationId: targetOrgId }
+    });
     return { success: true };
   }
 

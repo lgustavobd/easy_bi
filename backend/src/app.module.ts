@@ -12,6 +12,7 @@ import { SectorsModule } from './modules/sectors/sectors.module';
 import { PlansModule } from './modules/plans/plans.module';
 import { AccessRequestsModule } from './modules/access-requests/access-requests.module';
 import { PlanChangeRequestsModule } from './modules/plan-change-requests/plan-change-requests.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { PlanChangeRequestsModule } from './modules/plan-change-requests/plan-ch
     ImportTemplatesModule,
     AuditLogsModule,
     SectorsModule,
+    NotificationsModule,
     AccessRequestsModule,
     PlanChangeRequestsModule
   ]

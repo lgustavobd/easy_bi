@@ -35,31 +35,6 @@ async function main() {
       sortOrder: 0
     },
     {
-      id: '00000000-0000-0000-0000-000000000101',
-      code: 'STARTER',
-      name: 'Starter',
-      description: 'Plano inicial para validar uso com poucos dados.',
-      priceLabel: 'R$ 148,50/mes',
-      monthlyPrice: 148.50,
-      maxUsers: 1,
-      maxDatasets: 5,
-      maxDashboards: 3,
-      maxRowsPerDataset: null,
-      maxTotalRows: 2000,
-      trialDays: null,
-      canExportCharts: false,
-      canUseCalculatedMetrics: false,
-      canUsePatchRows: true,
-      canUseAppendRows: false,
-      canUseCustomLogo: false,
-      canCreateSectors: false,
-      canUseDatabaseConnections: false,
-      requiresDedicatedInfra: false,
-      isDefault: false,
-      isActive: true,
-      sortOrder: 10
-    },
-    {
       id: '00000000-0000-0000-0000-000000000104',
       code: 'ESSENTIAL',
       name: 'Essencial',
@@ -82,57 +57,7 @@ async function main() {
       requiresDedicatedInfra: false,
       isDefault: false,
       isActive: true,
-      sortOrder: 15
-    },
-    {
-      id: '00000000-0000-0000-0000-000000000102',
-      code: 'PRO',
-      name: 'Pro',
-      description: 'Plano para operacao com mais dashboards e metricas.',
-      priceLabel: 'R$ 373,50/mes',
-      monthlyPrice: 373.50,
-      maxUsers: 5,
-      maxDatasets: 25,
-      maxDashboards: 15,
-      maxRowsPerDataset: null,
-      maxTotalRows: 5000,
-      trialDays: null,
-      canExportCharts: true,
-      canUseCalculatedMetrics: true,
-      canUsePatchRows: true,
-      canUseAppendRows: true,
-      canUseCustomLogo: false,
-      canCreateSectors: true,
-      canUseDatabaseConnections: false,
-      requiresDedicatedInfra: false,
-      isDefault: false,
-      isActive: true,
-      sortOrder: 20
-    },
-    {
-      id: '00000000-0000-0000-0000-000000000103',
-      code: 'BUSINESS',
-      name: 'Business',
-      description: 'Plano completo para organizacoes em producao.',
-      priceLabel: 'R$ 748,50/mes',
-      monthlyPrice: 748.50,
-      maxUsers: 10,
-      maxDatasets: 100,
-      maxDashboards: 60,
-      maxRowsPerDataset: null,
-      maxTotalRows: 11000,
-      trialDays: null,
-      canExportCharts: true,
-      canUseCalculatedMetrics: true,
-      canUsePatchRows: true,
-      canUseAppendRows: true,
-      canUseCustomLogo: true,
-      canCreateSectors: true,
-      canUseDatabaseConnections: false,
-      requiresDedicatedInfra: false,
-      isDefault: false,
-      isActive: true,
-      sortOrder: 30
+      sortOrder: 10
     }
     // Corporate fica reservado para uma fase futura. A estrutura existe,
     // mas o plano nao deve aparecer nem ser ofertado por enquanto.
@@ -157,7 +82,7 @@ async function main() {
     const { id, code, ...data } = plan;
     await prisma.plan.upsert({ where: { code }, update: data, create: { id, code, ...data } });
   }
-  await prisma.plan.updateMany({ where: { code: { in: ['ENTERPRISE', 'CORPORATE'] } }, data: { isActive: false, isDefault: false } });
+  await prisma.plan.updateMany({ where: { code: { in: ['STARTER', 'PRO', 'BUSINESS', 'ENTERPRISE', 'CORPORATE'] } }, data: { isActive: false, isDefault: false } });
 
   const superRole = await prisma.role.upsert({ where: { code: 'SUPER_ADMIN' }, update: {}, create: { name: 'Super Admin', code: 'SUPER_ADMIN', description: 'Administrador global do SaaS' } });
   const orgAdminRole = await prisma.role.upsert({ where: { code: 'ORG_ADMIN' }, update: {}, create: { name: 'Admin da Organização', code: 'ORG_ADMIN', description: 'Administrador da organização' } });

@@ -3796,6 +3796,192 @@ body {
   gap: .25rem !important;
 }
 
+.app-notification-wrap {
+  position: relative;
+  z-index: 5000;
+}
+
+.app-notification-button {
+  position: relative;
+  width: 2.15rem;
+  height: 2.15rem;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgb(var(--easy-primary-rgb) / .14);
+  border-radius: .82rem;
+  color: #475569;
+  background: rgba(255, 255, 255, .82);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, .06);
+  transition: .16s ease;
+}
+
+.app-notification-button:hover,
+.app-notification-button.is-open {
+  color: var(--easy-primary);
+  border-color: rgb(var(--easy-primary-rgb) / .28);
+  background: linear-gradient(135deg, #fff, var(--easy-primary-soft));
+  transform: translateY(-1px);
+}
+
+.app-notification-badge {
+  position: absolute;
+  top: -.32rem;
+  right: -.28rem;
+  min-width: 1.05rem;
+  height: 1.05rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #fff;
+  border-radius: 999px;
+  padding: 0 .23rem;
+  color: #fff;
+  background: linear-gradient(135deg, #ef4444, #f97316);
+  font-size: .52rem;
+  font-weight: 1000;
+  line-height: 1;
+}
+
+.app-notification-popover {
+  position: fixed;
+  top: 4.85rem;
+  right: 1.05rem;
+  z-index: 2147482000;
+  width: min(21.5rem, calc(100vw - 1.2rem));
+  overflow: hidden;
+  border: 1px solid rgb(var(--easy-primary-rgb) / .18);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, .98);
+  box-shadow: 0 28px 80px rgba(15, 23, 42, .24);
+  backdrop-filter: blur(22px);
+}
+
+.app-notification-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  padding: .85rem .9rem;
+  border-bottom: 1px solid rgba(226, 232, 240, .9);
+  background:
+    radial-gradient(circle at 100% 0%, rgb(var(--easy-primary-rgb) / .12), transparent 40%),
+    linear-gradient(135deg, #fff, #f8fafc);
+}
+
+.app-notification-head p {
+  margin: 0;
+  color: #020617;
+  font-size: .92rem;
+  font-weight: 1000;
+}
+
+.app-notification-head small {
+  display: block;
+  margin-top: .08rem;
+  color: #64748b;
+  font-size: .68rem;
+  font-weight: 800;
+}
+
+.app-notification-head button {
+  display: inline-flex;
+  align-items: center;
+  gap: .32rem;
+  border: 1px solid rgb(var(--easy-primary-rgb) / .18);
+  border-radius: .75rem;
+  padding: .42rem .58rem;
+  color: var(--easy-primary);
+  background: var(--easy-primary-soft);
+  font-size: .64rem;
+  font-weight: 1000;
+}
+
+.app-notification-head button:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+
+.app-notification-list {
+  max-height: min(23rem, calc(100vh - 9rem));
+  overflow-y: auto;
+  padding: .35rem;
+}
+
+.app-notification-item {
+  width: 100%;
+  display: grid;
+  grid-template-columns: .58rem minmax(0, 1fr);
+  gap: .55rem;
+  border: 0;
+  border-radius: .9rem;
+  padding: .68rem .65rem;
+  text-align: left;
+  background: transparent;
+  transition: .16s ease;
+}
+
+.app-notification-item:hover {
+  background: #f8fafc;
+}
+
+.app-notification-item.is-unread {
+  background: linear-gradient(135deg, var(--easy-primary-soft), #fff);
+}
+
+.app-notification-dot {
+  width: .45rem;
+  height: .45rem;
+  margin-top: .28rem;
+  border-radius: 999px;
+  background: #cbd5e1;
+}
+
+.app-notification-item.is-unread .app-notification-dot {
+  background: var(--easy-primary);
+  box-shadow: 0 0 0 4px rgb(var(--easy-primary-rgb) / .12);
+}
+
+.app-notification-copy {
+  min-width: 0;
+  display: grid;
+  gap: .12rem;
+}
+
+.app-notification-copy strong {
+  overflow: hidden;
+  color: #0f172a;
+  font-size: .78rem;
+  font-weight: 1000;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-notification-copy small {
+  display: -webkit-box;
+  overflow: hidden;
+  color: #64748b;
+  font-size: .68rem;
+  font-weight: 750;
+  line-height: 1.35;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.app-notification-copy em {
+  color: #94a3b8;
+  font-size: .61rem;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.app-notification-empty {
+  padding: 1.2rem .8rem;
+  color: #94a3b8;
+  text-align: center;
+  font-size: .75rem;
+  font-weight: 900;
+}
+
 .app-top-logout-button {
   width: 2.15rem !important;
   height: 2.15rem !important;
@@ -3826,9 +4012,33 @@ body {
     width: 100%;
   }
 
+  .app-notification-popover {
+    position: fixed;
+    top: 4.55rem;
+    right: .6rem;
+    left: .6rem;
+    width: auto;
+  }
+
   .app-layout-frame-topnav .app-content {
     padding: .6rem !important;
   }
+}
+
+.app-header-topnav,
+.app-header-topnav .app-header-actions,
+.app-notification-wrap {
+  overflow: visible !important;
+}
+
+.app-header-topnav {
+  position: relative !important;
+  z-index: 2147481000 !important;
+}
+
+.app-layout-frame-topnav .app-content {
+  position: relative;
+  z-index: 1;
 }
 
 /* Confirmacoes precisam vencer qualquer modal aberto; elas destravam salvamentos dentro de popups. */
@@ -7462,5 +7672,35 @@ body:has(.confirm-dialog-backdrop) .data-preview-backdrop {
   .overview-map-row strong {
     max-width: none;
     text-align: left;
+  }
+}
+
+/* Camada final do sino: evita que o dropdown fique escondido atras do conteudo. */
+.app-header-topnav,
+.app-header-topnav .app-header-actions,
+.app-notification-wrap {
+  overflow: visible !important;
+}
+
+.app-header-topnav {
+  position: relative !important;
+  z-index: 2147481000 !important;
+}
+
+.app-notification-popover {
+  position: fixed !important;
+  top: 4.85rem !important;
+  right: 1.05rem !important;
+  z-index: 2147482000 !important;
+  width: min(21.5rem, calc(100vw - 1.2rem)) !important;
+  max-height: calc(100vh - 5.8rem) !important;
+}
+
+@media (max-width: 900px) {
+  .app-notification-popover {
+    top: 4.55rem !important;
+    right: .6rem !important;
+    left: .6rem !important;
+    width: auto !important;
   }
 }

@@ -3,6 +3,7 @@ import { PrismaService } from '../../database/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { getAccessibleSectorIds, ensureSectorAccess } from '../../common/utils/sector-access';
 import { PlansService } from '../plans/plans.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 type FilterRule = {
   id?: string;
@@ -48,7 +49,12 @@ const DATA_TYPES = new Set(['TEXT', 'NUMBER', 'DATE', 'BOOLEAN', 'CURRENCY', 'PE
 
 @Injectable()
 export class DashboardsService {
-  constructor(private prisma: PrismaService, private audit: AuditLogsService, private plans: PlansService) {}
+  constructor(
+    private prisma: PrismaService,
+    private audit: AuditLogsService,
+    private plans: PlansService,
+    private notifications: NotificationsService
+  ) {}
 
   async create(dto: any, organizationId: string, user: any) {
     await this.plans.assertCanCreateDashboard(organizationId);
@@ -75,6 +81,12 @@ export class DashboardsService {
       }
     });
     await this.audit.register({ organizationId, userId: user.id, action: 'dashboard.created', entity: 'dashboard', entityId: dashboard.id });
+    await this.notifyDashboardEvent(user.id, organizationId, {
+      type: 'DASHBOARD_CREATED',
+      title: 'Dashboard criado',
+      message: `O dashboard ${dashboard.name} foi criado.`,
+      metadata: { dashboardId: dashboard.id }
+    });
     return dashboard;
   }
 
@@ -143,6 +155,12 @@ export class DashboardsService {
     }
 
     await this.audit.register({ organizationId, userId: user.id, action: 'dashboard.updated', entity: 'dashboard', entityId: id, metadata: { datasetId: nextDatasetId } });
+    await this.notifyDashboardEvent(user.id, organizationId, {
+      type: 'DASHBOARD_UPDATED',
+      title: 'Dashboard salvo',
+      message: `As alteracoes do dashboard ${dash.name} foram salvas.`,
+      metadata: { dashboardId: id, datasetId: nextDatasetId }
+    });
     return dash;
   }
 
@@ -157,6 +175,12 @@ export class DashboardsService {
     await this.get(id, organizationId, user);
     const dash = await this.prisma.dashboard.update({ where: { id }, data: { isPublished: true, status: 'PUBLISHED' } });
     await this.audit.register({ organizationId, userId: user.id, action: 'dashboard.published', entity: 'dashboard', entityId: id });
+    await this.notifyDashboardEvent(user.id, organizationId, {
+      type: 'DASHBOARD_PUBLISHED',
+      title: 'Dashboard publicado',
+      message: `O dashboard ${dash.name} foi publicado.`,
+      metadata: { dashboardId: id }
+    });
     return dash;
   }
 
@@ -188,6 +212,12 @@ export class DashboardsService {
       include: { widgets: true }
     });
     await this.audit.register({ organizationId, userId: user.id, action: 'dashboard.duplicated', entity: 'dashboard', entityId: copy.id, metadata: { sourceId: id } });
+    await this.notifyDashboardEvent(user.id, organizationId, {
+      type: 'DASHBOARD_DUPLICATED',
+      title: 'Dashboard duplicado',
+      message: `A copia ${copy.name} foi criada.`,
+      metadata: { dashboardId: copy.id, sourceId: id }
+    });
     return copy;
   }
 
@@ -799,5 +829,15 @@ export class DashboardsService {
 
   private normalizeText(value: string) {
     return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+  }
+
+  private async notifyDashboardEvent(userId: string, organizationId: string, payload: { type: string; title: string; message: string; metadata?: Record<string, any> }) {
+    await this.notifications.notifyUser(userId, {
+      organizationId,
+      type: payload.type,
+      title: payload.title,
+      message: payload.message,
+      metadata: payload.metadata
+    });
   }
 }

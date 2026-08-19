@@ -24,6 +24,12 @@ export const api = {
     impact: async (planId: string) => (await http.get(`/plan-change-requests/impact/${planId}`)).data,
     review: async (id: string, payload: any) => (await http.post(`/plan-change-requests/${id}/review`, payload)).data
   },
+  notifications: {
+    list: async () => (await http.get('/notifications')).data,
+    unreadCount: async () => (await http.get('/notifications/unread-count')).data,
+    markAsRead: async (id: string) => (await http.patch(`/notifications/${id}/read`)).data,
+    markAllAsRead: async () => (await http.patch('/notifications/read-all')).data
+  },
   sectors: {
     list: async (params: any = {}) => (await http.get('/sectors', { params })).data,
     create: async (payload: any) => (await http.post('/sectors', payload)).data,

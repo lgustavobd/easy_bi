@@ -1,11 +1,17 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PlansService } from '../plans/plans.service';
 
 @Injectable()
 export class PlanChangeRequestsService {
-  constructor(private prisma: PrismaService, private audit: AuditLogsService, private plans: PlansService) {}
+  constructor(
+    private prisma: PrismaService,
+    private audit: AuditLogsService,
+    private plans: PlansService,
+    private notifications: NotificationsService
+  ) {}
 
   async create(dto: any, user: any, organizationId?: string) {
     if (!organizationId) throw new ForbiddenException('Organizacao ativa nao informada.');
@@ -31,6 +37,13 @@ export class PlanChangeRequestsService {
       include: { organization: { include: { plan: true } }, requestedPlan: true, requestedBy: { select: { id: true, name: true, email: true } } }
     });
     await this.audit.register({ organizationId, userId: user.id, action: 'plan_change.requested', entity: 'plan_change_request', entityId: request.id, metadata: { requestedPlanId } });
+    await this.notifications.notifySuperAdmins({
+      organizationId,
+      type: 'PLAN_CHANGE_REQUESTED',
+      title: 'Solicitacao de troca de plano',
+      message: `${request.requestedBy.name} solicitou o plano ${request.requestedPlan.name} para ${request.organization.name}.`,
+      metadata: { planChangeRequestId: request.id, organizationId, requestedPlanId }
+    });
     return { ...(await this.hydrateCurrentPlans([request]))[0], impact };
   }
 
@@ -93,6 +106,15 @@ export class PlanChangeRequestsService {
       entity: 'plan_change_request',
       entityId: id,
       metadata: { requestedPlanId: request.requestedPlanId }
+    });
+    await this.notifications.notifyUser(request.requestedByUserId, {
+      organizationId: request.organizationId,
+      type: dto.status === 'APPROVED' ? 'PLAN_CHANGE_APPROVED' : 'PLAN_CHANGE_REJECTED',
+      title: dto.status === 'APPROVED' ? 'Troca de plano aprovada' : 'Troca de plano recusada',
+      message: dto.status === 'APPROVED'
+        ? `A organizacao ${request.organization.name} agora esta no plano ${request.requestedPlan.name}.`
+        : `A solicitacao do plano ${request.requestedPlan.name} foi recusada.${dto.adminNotes ? ` Motivo: ${dto.adminNotes}` : ''}`,
+      metadata: { planChangeRequestId: id, requestedPlanId: request.requestedPlanId, status: dto.status }
     });
     return (await this.hydrateCurrentPlans([reviewed]))[0];
   }

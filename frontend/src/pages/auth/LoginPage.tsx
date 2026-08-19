@@ -25,36 +25,12 @@ const fallbackShowcasePlans = [
     features: { canUsePatchRows: true }
   },
   {
-    id: 'starter-preview',
-    name: 'Starter',
-    monthlyPrice: 148.5,
-    currency: 'BRL',
-    limits: { maxUsers: 1, maxDatasets: 5, maxDashboards: 3, maxTotalRows: 2000 },
-    features: { canUsePatchRows: true }
-  },
-  {
     id: 'essential-preview',
     name: 'Essencial',
     monthlyPrice: 249,
     currency: 'BRL',
     limits: { maxUsers: 3, maxDatasets: 8, maxDashboards: 5, maxTotalRows: 5000 },
     features: { canExportCharts: true, canUseCalculatedMetrics: true, canUsePatchRows: true, canUseAppendRows: true, canCreateSectors: true }
-  },
-  {
-    id: 'pro-preview',
-    name: 'Pro',
-    monthlyPrice: 373.5,
-    currency: 'BRL',
-    limits: { maxUsers: 5, maxDatasets: 25, maxDashboards: 15, maxTotalRows: 5000 },
-    features: { canExportCharts: true, canUseCalculatedMetrics: true, canUsePatchRows: true, canUseAppendRows: true, canCreateSectors: true }
-  },
-  {
-    id: 'business-preview',
-    name: 'Business',
-    monthlyPrice: 748.5,
-    currency: 'BRL',
-    limits: { maxUsers: 10, maxDatasets: 100, maxDashboards: 60, maxTotalRows: 11000 },
-    features: { canExportCharts: true, canUseCalculatedMetrics: true, canUsePatchRows: true, canUseAppendRows: true, canUseCustomLogo: true, canCreateSectors: true }
   }
 ];
 
