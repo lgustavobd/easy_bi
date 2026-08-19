@@ -14,7 +14,7 @@ export class UsersController {
   constructor(private service: UsersService) {}
   @Get('roles') roles() { return this.service.roles(); }
   @Post() @Permissions('users.manage') create(@Body() dto: CreateUserDto, @CurrentUser() user: any, @CurrentOrganization() org?: string) { return this.service.create(dto, user, org); }
-  @Get() @Permissions('users.manage') list(@CurrentUser() user: any, @CurrentOrganization() org?: string, @Query('organizationId') organizationId?: string) { return this.service.list(user, user?.isSuperAdmin ? organizationId || org : org); }
+  @Get() @Permissions('users.manage') list(@CurrentUser() user: any, @CurrentOrganization() org?: string, @Query('organizationId') organizationId?: string, @Query('summary') summary?: string) { return this.service.list(user, user?.isSuperAdmin ? organizationId || org : org, { summary: summary === 'true' }); }
   @Get(':id') @Permissions('users.manage') get(@Param('id') id: string, @CurrentUser() user: any, @CurrentOrganization() org?: string) { return this.service.get(id, user, org); }
   @Put(':id') @Permissions('users.manage') update(@Param('id') id: string, @Body() dto: UpdateUserDto, @CurrentUser() user: any, @CurrentOrganization() org?: string) { return this.service.update(id, dto, user, org); }
   @Post(':id/reset-password') @Permissions('users.manage') resetPassword(@Param('id') id: string, @Body() dto: ResetPasswordDto, @CurrentUser() user: any, @CurrentOrganization() org?: string) { return this.service.resetPassword(id, dto.password, user, org); }

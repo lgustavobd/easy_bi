@@ -385,11 +385,30 @@ export class DatasetsService {
     return this.get(id, organizationId, user);
   }
 
-  async list(organizationId: string, user?: any, sectorId?: string) {
+  async list(organizationId: string, user?: any, sectorId?: string, options: { summary?: boolean } = {}) {
     const sectorIds = user ? await getAccessibleSectorIds(this.prisma, user, organizationId) : [];
     if (user && !sectorIds.length) return [];
     const filterIds = sectorId ? (sectorIds.includes(sectorId) ? [sectorId] : []) : sectorIds;
     if (sectorId && !filterIds.length) return [];
+    if (options.summary) {
+      return this.prisma.dataset.findMany({
+        where: { organizationId, deletedAt: null, ...(filterIds.length ? { sectorId: { in: filterIds } } : {}) },
+        select: {
+          id: true,
+          name: true,
+          rowCount: true,
+          status: true,
+          sectorId: true,
+          createdAt: true,
+          updatedAt: true,
+          metadata: true,
+          sector: { select: { id: true, name: true } },
+          organization: { select: { id: true, name: true, slug: true } },
+          columns: { select: { id: true, name: true, originalName: true, dataType: true, semanticType: true, formatConfig: true, isMetric: true, isDimension: true } }
+        },
+        orderBy: { createdAt: 'desc' }
+      });
+    }
     return this.prisma.dataset.findMany({
       where: { organizationId, deletedAt: null, ...(filterIds.length ? { sectorId: { in: filterIds } } : {}) },
       include: { columns: { orderBy: { createdAt: 'asc' } }, sector: true, organization: { select: { id: true, name: true, slug: true } } },

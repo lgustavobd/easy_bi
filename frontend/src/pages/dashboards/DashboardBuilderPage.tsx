@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent, MouseEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -9,11 +9,10 @@ import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
 import { ArrowLeft, BarChart3, CheckCircle2, Database, Download, Edit3, Eye, Grid3X3, LayoutTemplate, LineChart, Loader2, Lock, PieChart, Plus, Save, Table2, Trash2, TrendingUp, Unlock, X } from 'lucide-react';
 import { api } from '../../api/resources.api';
-import { ChartRenderer, FilterRule, TableColumnFormatConfig, ValueFormatConfig } from '../../components/dashboard/ChartRenderer';
+import { ChartRenderer, FilterRule, LazyChartRenderer, TableColumnFormatConfig, ValueFormatConfig } from '../../components/dashboard/ChartRenderer';
 import { DashboardDataDock } from '../../components/dashboard/DashboardDataDock';
 import type { DashboardFieldDragPayload } from '../../components/dashboard/DashboardDataDock';
 import { DashboardFilterDock } from '../../components/dashboard/DashboardFilterDock';
-import { exportWidgetAsPng } from '../../components/dashboard/export-widget';
 import { useAuthStore } from '../../store/auth.store';
 import { planFeature } from '../../utils/plan';
 import { useConfirm } from '../../components/ConfirmDialog';
@@ -293,6 +292,42 @@ function mergeComboData(primaryData: any, secondaryData: any) {
   return { ...primaryData, rows: Array.from(rowsByName.values()), secondaryFormatConfig: secondaryData?.formatConfig };
 }
 
+function widgetPreviewPayload(widget: WidgetState, filters: FilterRule[], metricColumn = widget.metricColumn) {
+  return {
+    datasetId: widget.datasetId,
+    metricColumn,
+    dimensionColumn: widget.type === 'KPI' ? undefined : widget.dimensionColumn,
+    tableColumns: widget.type === 'TABLE' ? (widget.tableColumns?.length ? widget.tableColumns : [widget.dimensionColumn, widget.metricColumn].filter(Boolean)) : undefined,
+    aggregation: widget.aggregation,
+    filters,
+    limit: widget.type === 'TABLE' ? 100 : 40
+  };
+}
+
+function buildWidgetPreviewRequests(widgets: WidgetState[], filters: FilterRule[]) {
+  return widgets.flatMap((widget) => {
+    const requests = [{ widgetId: widget.id, part: 'primary', payload: widgetPreviewPayload(widget, filters) }];
+    if (isComboVisual(widget) && widget.secondaryMetricColumn && widget.secondaryMetricColumn !== widget.metricColumn) {
+      requests.push({ widgetId: widget.id, part: 'secondary', payload: widgetPreviewPayload(widget, filters, widget.secondaryMetricColumn) });
+    }
+    return requests;
+  });
+}
+
+function buildWidgetDataMap(widgets: WidgetState[], requests: ReturnType<typeof buildWidgetPreviewRequests>, results: any[]) {
+  const byRequest = new Map<string, any>();
+  requests.forEach((request, index) => byRequest.set(`${request.widgetId}:${request.part}`, results[index]));
+  const byWidget = new Map<string, any>();
+  widgets.forEach((widget) => {
+    const primaryData = byRequest.get(`${widget.id}:primary`);
+    const secondaryData = widget.secondaryMetricColumn === widget.metricColumn
+      ? primaryData
+      : byRequest.get(`${widget.id}:secondary`);
+    byWidget.set(widget.id, isComboVisual(widget) && secondaryData ? mergeComboData(primaryData, secondaryData) : primaryData);
+  });
+  return byWidget;
+}
+
 function widgetFactory(type: WidgetType, partial: Partial<WidgetState> = {}): WidgetState {
   const defaultSize = { KPI: { w: 3, h: 4 }, BAR_CHART: { w: 6, h: 8 }, LINE_CHART: { w: 6, h: 8 }, DONUT_CHART: { w: 4, h: 8 }, TABLE: { w: 6, h: 8 } }[type];
   return {
@@ -416,39 +451,78 @@ function canEditDashboard(user: any, organization: any) {
   return Boolean(user?.isSuperAdmin || role === 'SUPER_ADMIN' || role === 'ORG_ADMIN' || role === 'EDITOR');
 }
 
-function WidgetCard({ widget, dataset, filters, canExportCharts, draggedField, dragTarget, onDragTarget, onDropField, onChangeType, onEdit, onRemove, onSelect, onToggleLock, selected }: { widget: WidgetState; dataset: any; filters: FilterRule[]; canExportCharts: boolean; draggedField: DashboardFieldDragPayload | null; dragTarget: { widgetId: string; zone: FieldDropZone } | null; onDragTarget: (target: { widgetId: string; zone: FieldDropZone } | null) => void; onDropField: (widgetId: string, field: DashboardFieldDragPayload, zone: FieldDropZone) => void; onChangeType: (item: WidgetCatalogItem) => void; selected: boolean; onEdit: () => void; onRemove: () => void; onSelect: () => void; onToggleLock: () => void }) {
+function useDebouncedValue<T>(value: T, delay = 320) {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => setDebouncedValue(value), delay);
+    return () => window.clearTimeout(timeoutId);
+  }, [value, delay]);
+
+  return debouncedValue;
+}
+
+type WidgetCardProps = {
+  widget: WidgetState;
+  dataset: any;
+  data: any;
+  loading: boolean;
+  filters: FilterRule[];
+  canExportCharts: boolean;
+  draggedField: DashboardFieldDragPayload | null;
+  dragTarget: { widgetId: string; zone: FieldDropZone } | null;
+  onDragTarget: (target: { widgetId: string; zone: FieldDropZone } | null) => void;
+  onDropField: (widgetId: string, field: DashboardFieldDragPayload, zone: FieldDropZone) => void;
+  onChangeType: (item: WidgetCatalogItem) => void;
+  selected: boolean;
+  onEdit: () => void;
+  onRemove: () => void;
+  onSelect: () => void;
+  onToggleLock: () => void;
+};
+
+function activeZoneFor(props: WidgetCardProps) {
+  return props.dragTarget?.widgetId === props.widget.id ? props.dragTarget.zone : null;
+}
+
+function sameWidgetShape(a: WidgetState, b: WidgetState) {
+  return a === b || (
+    a.id === b.id &&
+    a.type === b.type &&
+    a.visualType === b.visualType &&
+    a.title === b.title &&
+    a.datasetId === b.datasetId &&
+    a.metricColumn === b.metricColumn &&
+    a.secondaryMetricColumn === b.secondaryMetricColumn &&
+    a.dimensionColumn === b.dimensionColumn &&
+    a.aggregation === b.aggregation &&
+    a.showLegend === b.showLegend &&
+    a.valueFormat === b.valueFormat &&
+    a.valuePrefix === b.valuePrefix &&
+    a.valueSuffix === b.valueSuffix &&
+    a.valueDecimals === b.valueDecimals &&
+    a.secondaryValueFormat === b.secondaryValueFormat &&
+    a.secondaryValuePrefix === b.secondaryValuePrefix &&
+    a.secondaryValueSuffix === b.secondaryValueSuffix &&
+    a.secondaryValueDecimals === b.secondaryValueDecimals &&
+    a.locked === b.locked &&
+    a.x === b.x &&
+    a.y === b.y &&
+    a.w === b.w &&
+    a.h === b.h &&
+    (a.tableColumns || []).join('|') === (b.tableColumns || []).join('|') &&
+    a.tableColumnFormats === b.tableColumnFormats
+  );
+}
+
+const WidgetCard = memo(function WidgetCard({ widget, dataset, data, loading, filters, canExportCharts, draggedField, dragTarget, onDragTarget, onDropField, onChangeType, onEdit, onRemove, onSelect, onToggleLock, selected }: WidgetCardProps) {
   const cardRef = useRef<HTMLElement | null>(null);
   const activeDropZone = dragTarget?.widgetId === widget.id ? dragTarget.zone : null;
   const [typeMenuOpen, setTypeMenuOpen] = useState(false);
   const [typeMenuPlacement, setTypeMenuPlacement] = useState<'left' | 'right'>('left');
   const selectedType = catalogItemForWidget(widget);
-  const { data, isFetching } = useQuery({
-    queryKey: ['dashboard-preview', widget.datasetId, widget.metricColumn, widget.secondaryMetricColumn, widget.dimensionColumn, JSON.stringify(widget.tableColumns || []), widget.aggregation, widget.type, widgetVisualType(widget), JSON.stringify(filters)],
-    queryFn: async () => {
-      const primaryData = await api.dashboards.previewData({
-        datasetId: widget.datasetId,
-        metricColumn: widget.metricColumn,
-        dimensionColumn: widget.type === 'KPI' ? undefined : widget.dimensionColumn,
-        tableColumns: widget.type === 'TABLE' ? (widget.tableColumns?.length ? widget.tableColumns : [widget.dimensionColumn, widget.metricColumn].filter(Boolean)) : undefined,
-        aggregation: widget.aggregation,
-        filters,
-        limit: widget.type === 'TABLE' ? 100 : 40
-      });
-      if (!isComboVisual(widget) || !widget.secondaryMetricColumn) return primaryData;
-      if (widget.secondaryMetricColumn === widget.metricColumn) return mergeComboData(primaryData, primaryData);
-      const secondaryData = await api.dashboards.previewData({
-        datasetId: widget.datasetId,
-        metricColumn: widget.secondaryMetricColumn,
-        dimensionColumn: widget.dimensionColumn,
-        aggregation: widget.aggregation,
-        filters,
-        limit: 40
-      });
-      return mergeComboData(primaryData, secondaryData);
-    },
-    enabled: Boolean(widget.datasetId),
-    staleTime: 5_000
-  });
+  const valueFormatConfig = useMemo(() => ({ type: widget.valueFormat, prefix: widget.valuePrefix, suffix: widget.valueSuffix, decimals: widget.valueDecimals }), [widget.valueFormat, widget.valuePrefix, widget.valueSuffix, widget.valueDecimals]);
+  const secondaryValueFormatConfig = useMemo(() => ({ type: widget.secondaryValueFormat, prefix: widget.secondaryValuePrefix, suffix: widget.secondaryValueSuffix, decimals: widget.secondaryValueDecimals }), [widget.secondaryValueFormat, widget.secondaryValuePrefix, widget.secondaryValueSuffix, widget.secondaryValueDecimals]);
 
   function dropZoneFromEvent(event: DragEvent<HTMLElement>): FieldDropZone {
     if (widget.type === 'KPI') return 'vertical';
@@ -503,6 +577,12 @@ function WidgetCard({ widget, dataset, filters, canExportCharts, draggedField, d
     setTypeMenuOpen((current) => !current);
   }
 
+  async function exportChart() {
+    if (!canExportCharts) return;
+    const { exportWidgetAsPng } = await import('../../components/dashboard/export-widget');
+    await exportWidgetAsPng(cardRef.current, widget, dataset, filters);
+  }
+
   return (
     <article
       ref={cardRef}
@@ -551,13 +631,13 @@ function WidgetCard({ widget, dataset, filters, canExportCharts, draggedField, d
             )}
           </div>
           <button title={widget.locked ? 'Destravar posição e tamanho' : 'Travar posição e tamanho'} onClick={(event) => { event.stopPropagation(); setTypeMenuOpen(false); onToggleLock(); }} className={`rounded-xl border px-2.5 py-2 text-xs font-black transition ${widget.locked ? 'border-primary bg-primary-soft text-primary' : 'border-slate-200 bg-white text-slate-500 hover:border-primary hover:bg-primary-soft hover:text-primary'}`}>{widget.locked ? <Lock size={14} /> : <Unlock size={14} />}</button>
-          <button title={canExportCharts ? 'Exportar grafico' : 'Exportacao bloqueada pelo plano'} disabled={!canExportCharts} onClick={(event) => { event.stopPropagation(); setTypeMenuOpen(false); if (canExportCharts) exportWidgetAsPng(cardRef.current, widget, dataset, filters); }} className="rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-xs font-black text-slate-600 hover:border-primary hover:bg-primary-soft hover:text-primary disabled:cursor-not-allowed disabled:opacity-40"><Download size={14} /></button>
+          <button title={canExportCharts ? 'Exportar grafico' : 'Exportacao bloqueada pelo plano'} disabled={!canExportCharts} onClick={(event) => { event.stopPropagation(); setTypeMenuOpen(false); exportChart(); }} className="rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-xs font-black text-slate-600 hover:border-primary hover:bg-primary-soft hover:text-primary disabled:cursor-not-allowed disabled:opacity-40"><Download size={14} /></button>
           <button title="Editar gráfico" onClick={(event) => { event.stopPropagation(); setTypeMenuOpen(false); onSelect(); onEdit(); }} className="rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-xs font-black text-slate-600 hover:border-primary hover:bg-primary-soft hover:text-primary"><Edit3 size={14} /></button>
           <button onClick={(event) => { event.stopPropagation(); setTypeMenuOpen(false); onRemove(); }} className="rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-xs font-black text-slate-400 hover:border-red-200 hover:bg-red-50 hover:text-red-600"><Trash2 size={14} /></button>
         </div>
       </div>
       <div className="h-[calc(100%-58px)] p-4">
-        <ChartRenderer type={widgetVisualType(widget)} metric={widget.metricColumn} secondaryMetric={widget.secondaryMetricColumn} dimension={widget.dimensionColumn} showLegend={widget.showLegend} formatConfig={{ type: widget.valueFormat, prefix: widget.valuePrefix, suffix: widget.valueSuffix, decimals: widget.valueDecimals }} secondaryFormatConfig={{ type: widget.secondaryValueFormat, prefix: widget.secondaryValuePrefix, suffix: widget.secondaryValueSuffix, decimals: widget.secondaryValueDecimals }} tableColumnFormats={widget.tableColumnFormats} data={data} loading={isFetching} />
+        <LazyChartRenderer type={widgetVisualType(widget)} metric={widget.metricColumn} secondaryMetric={widget.secondaryMetricColumn} dimension={widget.dimensionColumn} showLegend={widget.showLegend} formatConfig={valueFormatConfig} secondaryFormatConfig={secondaryValueFormatConfig} tableColumnFormats={widget.tableColumnFormats} data={data} loading={loading} />
       </div>
       <div className="resize-helper">{widget.locked ? 'posição travada' : 'arraste a borda para redimensionar'}</div>
       {draggedField && activeDropZone && !widget.locked && (
@@ -598,7 +678,18 @@ function WidgetCard({ widget, dataset, filters, canExportCharts, draggedField, d
       )}
     </article>
   );
-}
+}, (previous, next) => (
+  sameWidgetShape(previous.widget, next.widget) &&
+  previous.dataset?.id === next.dataset?.id &&
+  previous.dataset?.columns === next.dataset?.columns &&
+  previous.data === next.data &&
+  previous.loading === next.loading &&
+  previous.filters === next.filters &&
+  previous.canExportCharts === next.canExportCharts &&
+  previous.draggedField === next.draggedField &&
+  activeZoneFor(previous) === activeZoneFor(next) &&
+  previous.selected === next.selected
+));
 
 function WidgetEditorModal({ widget, dataset, filters, onClose, onSave }: { widget: WidgetState; dataset: any; filters: FilterRule[]; onClose: () => void; onSave: (payload: WidgetState) => void }) {
   const [draft, setDraft] = useState<WidgetState>(widget);
@@ -910,11 +1001,55 @@ export function DashboardBuilderPage() {
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState('');
 
-  const { data: datasets = [], isLoading: loadingDatasets } = useQuery({ queryKey: ['datasets'], queryFn: api.datasets.list });
+  const updateFieldDropTarget = useCallback((target: { widgetId: string; zone: FieldDropZone } | null) => {
+    startTransition(() => {
+      setFieldDropTarget((current) => {
+        if (!current && !target) return current;
+        if (current?.widgetId === target?.widgetId && current?.zone === target?.zone) return current;
+        return target;
+      });
+    });
+  }, []);
+
+  const handleFieldDragEnd = useCallback(() => {
+    setDraggedField(null);
+    updateFieldDropTarget(null);
+  }, [updateFieldDropTarget]);
+
+  const { data: datasets = [], isLoading: loadingDatasets } = useQuery({
+    queryKey: ['datasets', 'dashboard-builder-summary'],
+    queryFn: () => api.datasets.list({ summary: true })
+  });
   const { data: dashboard, isLoading: loadingDashboard } = useQuery({ queryKey: ['dashboard', id], queryFn: () => api.dashboards.get(id!), enabled: Boolean(id) });
 
   const selectedDataset = datasets.find((dataset: any) => dataset.id === selectedDatasetId) || datasets[0];
-  const selectedFilters = filters.filter((filter) => selectedDataset?.id && (!filter.datasetId || filter.datasetId === selectedDataset.id));
+  const selectedFilters = useMemo(
+    () => filters.filter((filter) => selectedDataset?.id && (!filter.datasetId || filter.datasetId === selectedDataset.id)),
+    [filters, selectedDataset?.id]
+  );
+  const debouncedSelectedFilters = useDebouncedValue(selectedFilters);
+  const dashboardWidgets = useMemo(
+    () => widgets.map((widget) => (selectedDataset?.id && widget.datasetId !== selectedDataset.id ? { ...widget, datasetId: selectedDataset.id } : widget)),
+    [widgets, selectedDataset?.id]
+  );
+  const previewRequests = useMemo(
+    () => buildWidgetPreviewRequests(dashboardWidgets, debouncedSelectedFilters),
+    [dashboardWidgets, debouncedSelectedFilters]
+  );
+  const previewRequestKey = useMemo(
+    () => JSON.stringify(previewRequests.map((request) => request.payload)),
+    [previewRequests]
+  );
+  const { data: previewBatch, isFetching: loadingPreviewBatch } = useQuery({
+    queryKey: ['dashboard-builder-data-batch', selectedDataset?.id, previewRequestKey],
+    queryFn: () => api.dashboards.previewDataBatch({ items: previewRequests.map((request) => request.payload) }),
+    enabled: Boolean(selectedDataset?.id && previewRequests.length),
+    staleTime: 45_000
+  });
+  const widgetDataById = useMemo(
+    () => buildWidgetDataMap(dashboardWidgets, previewRequests, previewBatch?.results || []),
+    [dashboardWidgets, previewRequests, previewBatch?.results]
+  );
   const editingWidget = widgets.find((widget) => widget.id === editingWidgetId);
   const canExportCharts = planFeature(organization, 'canExportCharts');
 
@@ -1192,7 +1327,7 @@ export function DashboardBuilderPage() {
       {!datasets.length && <div className="rounded-2xl border border-yellow-200 bg-yellow-50 p-5 text-sm font-bold text-yellow-900">Nenhuma base de dados encontrada. Importe um CSV/Excel antes de criar gráficos com dados reais.</div>}
 
       <div className="dashboard-workbench dashboard-workbench-three">
-        <DashboardDataDock dataset={selectedDataset} draggable onFieldDragStart={setDraggedField} onFieldDragEnd={() => { setDraggedField(null); setFieldDropTarget(null); }} />
+        <DashboardDataDock dataset={selectedDataset} draggable onFieldDragStart={setDraggedField} onFieldDragEnd={handleFieldDragEnd} />
         <div className="dashboard-workbench-main">
           <section className="dashboard-canvas">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-4">
@@ -1200,7 +1335,28 @@ export function DashboardBuilderPage() {
           <div className="flex flex-wrap items-center gap-2"><span className="inline-flex items-center gap-2 text-xs font-black text-slate-400"><Lock size={14} /> Base unica · filtros globais · sem sobreposição</span><button type="button" disabled={!selectedWidgetId} onClick={() => selectedWidgetId && openWidgetEditor(selectedWidgetId)} className="btn-muted px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"><Edit3 size={14} /> Editar selecionado</button></div>
         </div>
         <ResponsiveGridLayout className="layout" cols={12} rowHeight={36} margin={[16, 16]} containerPadding={[0, 0]} layout={layout} onLayoutChange={handleLayoutChange} compactType={null} preventCollision isBounded draggableHandle=".drag-handle" draggableCancel=".no-drag" resizeHandles={['se']}>
-          {widgets.map((widget) => <div key={widget.id}><WidgetCard widget={{ ...widget, datasetId: selectedDataset?.id || widget.datasetId }} dataset={selectedDataset} filters={selectedFilters} canExportCharts={canExportCharts} draggedField={draggedField} dragTarget={fieldDropTarget} onDragTarget={setFieldDropTarget} onDropField={handleWidgetFieldDrop} onChangeType={(item) => changeWidgetType(widget.id, item)} selected={selectedWidgetId === widget.id} onSelect={() => setSelectedWidgetId(widget.id)} onEdit={() => openWidgetEditor(widget.id)} onToggleLock={() => updateWidget(widget.id, { locked: !widget.locked })} onRemove={() => removeWidget(widget.id)} /></div>)}
+          {dashboardWidgets.map((widget) => (
+            <div key={widget.id}>
+              <WidgetCard
+                widget={widget}
+                dataset={selectedDataset}
+                data={widgetDataById.get(widget.id)}
+                loading={loadingPreviewBatch}
+                filters={debouncedSelectedFilters}
+                canExportCharts={canExportCharts}
+                draggedField={draggedField}
+                dragTarget={fieldDropTarget}
+                onDragTarget={updateFieldDropTarget}
+                onDropField={handleWidgetFieldDrop}
+                onChangeType={(item) => changeWidgetType(widget.id, item)}
+                selected={selectedWidgetId === widget.id}
+                onSelect={() => setSelectedWidgetId(widget.id)}
+                onEdit={() => openWidgetEditor(widget.id)}
+                onToggleLock={() => updateWidget(widget.id, { locked: !widget.locked })}
+                onRemove={() => removeWidget(widget.id)}
+              />
+            </div>
+          ))}
         </ResponsiveGridLayout>
           </section>
         </div>

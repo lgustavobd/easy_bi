@@ -1,4 +1,4 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { CurrentOrganization } from '../../common/decorators/current-organization.decorator';
 import { Permissions } from '../../common/decorators/permissions.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -10,7 +10,7 @@ import { AuditLogsService } from './audit-logs.service';
 @Controller('audit-logs')
 export class AuditLogsController {
   constructor(private service: AuditLogsService) {}
-  @Get() @Permissions('audit.view') list(@CurrentOrganization() organizationId?: string) {
-    return this.service.list(organizationId);
+  @Get() @Permissions('audit.view') list(@CurrentOrganization() organizationId?: string, @Query('limit') limit?: string) {
+    return this.service.list(organizationId, limit ? Number(limit) : undefined);
   }
 }

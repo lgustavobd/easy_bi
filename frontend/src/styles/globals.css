@@ -8291,6 +8291,116 @@ textarea:disabled {
   }
 }
 
+/* Scroll leve: evita repintura pesada enquanto a pessoa navega pelo sistema. */
+html,
+body {
+  scroll-behavior: auto !important;
+  overscroll-behavior: none;
+}
+
+.app-layout-frame-topnav .app-content {
+  overflow-x: hidden !important;
+  overflow-y: scroll !important;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scroll-behavior: auto !important;
+  transform: translateZ(0);
+}
+
+.app-layout-page-topnav .dashboard-list-row,
+.app-layout-page-topnav .overview-panel,
+.app-layout-page-topnav .overview-stat-card,
+.app-layout-page-topnav .overview-progress-card,
+.app-layout-page-topnav .overview-map-row,
+.app-layout-page-topnav .overview-ranking-row,
+.app-layout-page-topnav .overview-dashboard-row,
+.app-layout-page-topnav .overview-activity-row,
+.app-layout-page-topnav .plans-grid > .card-premium {
+  content-visibility: visible !important;
+  contain-intrinsic-size: auto !important;
+}
+
+.app-layout-page-topnav.is-scrolling *,
+.app-layout-page-topnav.is-scrolling *::before,
+.app-layout-page-topnav.is-scrolling *::after {
+  animation-play-state: paused !important;
+  transition-duration: 0s !important;
+}
+
+.app-layout-page-topnav.is-scrolling .app-layout-frame-topnav .app-main::before,
+.app-layout-page-topnav.is-scrolling .app-layout-frame-topnav .app-main::after,
+.app-layout-page-topnav.is-scrolling .dashboard-gallery-hero::before,
+.app-layout-page-topnav.is-scrolling .selection-hero::before,
+.app-layout-page-topnav.is-scrolling .page-hero::before,
+.app-layout-page-topnav.is-scrolling .page-hero::after,
+.app-layout-page-topnav.is-scrolling .overview-stat-card::after,
+.app-layout-page-topnav.is-scrolling .overview-map-total::after {
+  opacity: 0 !important;
+}
+
+.app-layout-page-topnav.is-scrolling .card-premium,
+.app-layout-page-topnav.is-scrolling .glass-card,
+.app-layout-page-topnav.is-scrolling .overview-panel,
+.app-layout-page-topnav.is-scrolling .dashboard-list-row,
+.app-layout-page-topnav.is-scrolling .dashboard-widget,
+.app-layout-page-topnav.is-scrolling .dashboard-widget-view,
+.app-layout-page-topnav.is-scrolling .dashboard-filter-dock {
+  box-shadow: none !important;
+  filter: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* Performance global: remove efeitos caros do app logado sem trocar a identidade visual. */
+.app-layout-page-topnav .app-header-topnav,
+.app-layout-page-topnav .app-top-brand,
+.app-layout-page-topnav .card-premium,
+.app-layout-page-topnav .glass-card,
+.app-layout-page-topnav .overview-panel,
+.app-layout-page-topnav .dashboard-list-row,
+.app-layout-page-topnav .dashboard-gallery-hero,
+.app-layout-page-topnav .selection-hero,
+.app-layout-page-topnav .page-hero,
+.app-layout-page-topnav .dashboard-widget,
+.app-layout-page-topnav .dashboard-widget-view,
+.app-layout-page-topnav .dashboard-filter-dock {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.app-layout-page-topnav .card-premium,
+.app-layout-page-topnav .glass-card,
+.app-layout-page-topnav .overview-panel,
+.app-layout-page-topnav .dashboard-list-row,
+.app-layout-page-topnav .dashboard-widget,
+.app-layout-page-topnav .dashboard-widget-view,
+.app-layout-page-topnav .dashboard-filter-dock {
+  box-shadow: 0 8px 20px rgba(15, 23, 42, .07) !important;
+}
+
+.app-layout-page-topnav .dashboard-gallery-hero,
+.app-layout-page-topnav .selection-hero,
+.app-layout-page-topnav .page-hero {
+  box-shadow: 0 10px 28px rgba(15, 23, 42, .10) !important;
+}
+
+.app-layout-page-topnav .app-main::before,
+.app-layout-page-topnav .app-main::after,
+.app-layout-page-topnav .dashboard-gallery-hero::before,
+.app-layout-page-topnav .selection-hero::before,
+.app-layout-page-topnav .page-hero::before,
+.app-layout-page-topnav .dashboard-card-orb,
+.app-layout-page-topnav .dashboard-snapshot-tile {
+  animation: none !important;
+  filter: none !important;
+}
+
+.app-layout-page-topnav .dashboard-list-row:hover,
+.app-layout-page-topnav .card-premium:hover,
+.app-layout-page-topnav .glass-card:hover {
+  transform: none !important;
+}
+
 /* Correção pós-refatoração: cards de dashboards e Visão Geral sem áreas mortas. */
 .overview-page.space-y-5 > :not([hidden]) ~ :not([hidden]) {
   margin-top: 0 !important;
@@ -8864,4 +8974,72 @@ textarea:disabled {
 
 .overview-map-panel .overview-map-list {
   height: 100% !important;
+}
+
+/* Performance: renderiza listas longas sob demanda e reduz efeitos caros. */
+.dashboard-list-row,
+.overview-panel,
+.overview-stat-card,
+.overview-progress-card,
+.overview-map-row,
+.overview-ranking-row,
+.overview-dashboard-row,
+.overview-activity-row,
+.plans-grid > .card-premium {
+  content-visibility: auto;
+  contain-intrinsic-size: 12rem;
+}
+
+.dashboard-list-row,
+.overview-panel,
+.overview-stat-card,
+.overview-progress-card,
+.overview-map-row,
+.overview-ranking-row,
+.overview-dashboard-row,
+.overview-activity-row,
+.plans-grid > .card-premium,
+.app-top-nav-link,
+.app-notification-button,
+.app-top-brand {
+  transition-duration: .12s !important;
+  will-change: auto !important;
+}
+
+.app-layout-frame-topnav .app-content {
+  scroll-behavior: auto !important;
+}
+
+@media (max-width: 1100px), (prefers-reduced-motion: reduce) {
+  .app-header-topnav,
+  .app-top-brand,
+  .dashboard-gallery-hero,
+  .selection-hero,
+  .page-hero,
+  .overview-panel,
+  .dashboard-list-row,
+  .plans-grid > .card-premium {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+
+  .dashboard-gallery-hero,
+  .selection-hero,
+  .page-hero,
+  .overview-panel,
+  .dashboard-list-row,
+  .plans-grid > .card-premium {
+    box-shadow: 0 8px 22px rgba(15, 23, 42, .08) !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: .01ms !important;
+  }
 }

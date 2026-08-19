@@ -44,6 +44,11 @@ type DatasetColumnMeta = {
   formatConfig?: any;
 } | null;
 
+type DatasetResultContext = {
+  rowCache?: Map<string, Promise<Record<string, any>[]>>;
+  datasetAccessCache?: Map<string, Promise<any>>;
+};
+
 const DATASET_SCAN_CHUNK_SIZE = Number(process.env.DATASET_SCAN_CHUNK_SIZE || 5000);
 const DATA_TYPES = new Set(['TEXT', 'NUMBER', 'DATE', 'BOOLEAN', 'CURRENCY', 'PERCENTAGE']);
 
@@ -90,12 +95,29 @@ export class DashboardsService {
     return dashboard;
   }
 
-  async list(organizationId: string, user: any) {
+  async list(organizationId: string, user: any, summary = false) {
     const sectorIds = await getAccessibleSectorIds(this.prisma, user, organizationId);
     if (!sectorIds.length) return [];
     return this.prisma.dashboard.findMany({
       where: { organizationId, deletedAt: null, ...(sectorIds.length ? { sectorId: { in: sectorIds } } : {}) },
-      include: { sector: true, widgets: { where: { deletedAt: null } } },
+      include: {
+        sector: summary ? { select: { id: true, name: true } } : true,
+        widgets: summary
+          ? {
+              where: { deletedAt: null },
+              select: {
+                id: true,
+                type: true,
+                title: true,
+                metricColumn: true,
+                dimensionColumn: true,
+                aggregation: true,
+                config: true,
+                positionConfig: true
+              }
+            }
+          : { where: { deletedAt: null } }
+      },
       orderBy: { updatedAt: 'desc' }
     });
   }
@@ -277,6 +299,32 @@ export class DashboardsService {
     return this.buildDatasetResult(dto, organizationId, user);
   }
 
+  async previewDataBatch(dto: { items?: DataRequest[] }, organizationId: string, user: any) {
+    const items = Array.isArray(dto.items) ? dto.items.slice(0, 40) : [];
+    const results: any[] = new Array(items.length);
+    const concurrency = Math.min(2, Math.max(1, items.length));
+    const context: DatasetResultContext = {
+      rowCache: new Map(),
+      datasetAccessCache: new Map()
+    };
+    let cursor = 0;
+
+    async function worker(service: DashboardsService) {
+      while (cursor < items.length) {
+        const index = cursor;
+        cursor += 1;
+        try {
+          results[index] = await service.buildDatasetResult(items[index], organizationId, user, context);
+        } catch (error: any) {
+          results[index] = { value: 0, rows: [], totalRows: 0, error: error?.message || 'Falha ao carregar quadro.' };
+        }
+      }
+    }
+
+    await Promise.all(Array.from({ length: concurrency }, () => worker(this)));
+    return { results };
+  }
+
   async filterOptions(dto: { datasetId: string; column: string; search?: string; filters?: FilterRule[]; limit?: number }, organizationId: string, user: any) {
     await this.ensureDataset(dto.datasetId, organizationId, user);
 
@@ -303,9 +351,9 @@ export class DashboardsService {
     };
   }
 
-  private async buildDatasetResult(request: DataRequest, organizationId: string, user?: any) {
+  private async buildDatasetResult(request: DataRequest, organizationId: string, user?: any, context?: DatasetResultContext) {
     if (!request.datasetId) return { value: 0, rows: [], totalRows: 0 };
-    await this.ensureDataset(request.datasetId, organizationId, user);
+    await this.ensureDatasetCached(request.datasetId, organizationId, user, context);
 
     const metric = request.metricColumn || '';
     const dimension = request.dimensionColumn || '';
@@ -342,7 +390,7 @@ export class DashboardsService {
         this.addToAccumulator(accumulator, metricValue, aggregation);
         grouped.set(key, accumulator);
       }
-    });
+    }, context?.rowCache);
 
     if (tableColumns.length) {
       return {
@@ -370,7 +418,19 @@ export class DashboardsService {
     };
   }
 
-  private async scanDatasetRows(datasetId: string, organizationId: string, onRow: (row: Record<string, any>) => void | Promise<void>) {
+  private async scanDatasetRows(datasetId: string, organizationId: string, onRow: (row: Record<string, any>) => void | Promise<void>, rowCache?: Map<string, Promise<Record<string, any>[]>>) {
+    if (rowCache) {
+      const cacheKey = `${organizationId}:${datasetId}`;
+      let rowsPromise = rowCache.get(cacheKey);
+      if (!rowsPromise) {
+        rowsPromise = this.readDatasetRows(datasetId, organizationId);
+        rowCache.set(cacheKey, rowsPromise);
+      }
+      const rows = await rowsPromise;
+      for (const row of rows) await onRow(row);
+      return;
+    }
+
     let skip = 0;
     while (true) {
       const rows = await this.prisma.datasetRow.findMany({
@@ -385,6 +445,25 @@ export class DashboardsService {
       skip += rows.length;
       if (rows.length < DATASET_SCAN_CHUNK_SIZE) break;
     }
+  }
+
+  private async readDatasetRows(datasetId: string, organizationId: string) {
+    const allRows: Record<string, any>[] = [];
+    let skip = 0;
+    while (true) {
+      const rows = await this.prisma.datasetRow.findMany({
+        where: { datasetId, organizationId },
+        select: { data: true },
+        orderBy: { rowIndex: 'asc' },
+        skip,
+        take: DATASET_SCAN_CHUNK_SIZE
+      });
+      if (!rows.length) break;
+      allRows.push(...rows.map((row) => row.data as Record<string, any>));
+      skip += rows.length;
+      if (rows.length < DATASET_SCAN_CHUNK_SIZE) break;
+    }
+    return allRows;
   }
 
   private async resolveTableColumns(datasetId: string, requestedColumns?: string[]) {
@@ -487,6 +566,17 @@ export class DashboardsService {
     const dataset = await this.prisma.dataset.findFirst({ where: { id: datasetId, organizationId, deletedAt: null, ...(sectorIds.length ? { sectorId: { in: sectorIds } } : {}) } });
     if (!dataset) throw new NotFoundException('Dataset não encontrado para esta organização.');
     return dataset;
+  }
+
+  private async ensureDatasetCached(datasetId: string, organizationId: string, user?: any, context?: DatasetResultContext) {
+    if (!context?.datasetAccessCache) return this.ensureDataset(datasetId, organizationId, user);
+    const cacheKey = `${organizationId}:${user?.id || 'system'}:${datasetId}`;
+    let datasetPromise = context.datasetAccessCache.get(cacheKey);
+    if (!datasetPromise) {
+      datasetPromise = this.ensureDataset(datasetId, organizationId, user);
+      context.datasetAccessCache.set(cacheKey, datasetPromise);
+    }
+    return datasetPromise;
   }
 
   private normalizeDashboardLayout(layoutConfig: any) {

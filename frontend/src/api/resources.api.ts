@@ -37,7 +37,7 @@ export const api = {
     remove: async (id: string) => (await http.delete(`/sectors/${id}`)).data
   },
   dashboards: {
-    list: async () => (await http.get('/dashboards')).data,
+    list: async (params: any = {}) => (await http.get('/dashboards', { params })).data,
     create: async (payload: any) => (await http.post('/dashboards', payload)).data,
     get: async (id: string) => (await http.get(`/dashboards/${id}`)).data,
     update: async (id: string, payload: any) => (await http.put(`/dashboards/${id}`, payload)).data,
@@ -48,6 +48,7 @@ export const api = {
     publish: async (id: string) => (await http.post(`/dashboards/${id}/publish`)).data,
     duplicate: async (id: string) => (await http.post(`/dashboards/${id}/duplicate`)).data,
     previewData: async (payload: any) => (await http.post('/dashboards/data-preview', payload)).data,
+    previewDataBatch: async (payload: any) => (await http.post('/dashboards/data-preview-batch', payload)).data,
     filterOptions: async (payload: any) => (await http.post('/dashboards/filter-options', payload)).data
   },
   datasets: {
@@ -74,7 +75,7 @@ export const api = {
     resetPassword: async (id: string, payload: any) => (await http.post(`/users/${id}/reset-password`, payload)).data,
     remove: async (id: string, params: any = {}) => (await http.delete(`/users/${id}`, { params })).data
   },
-  audit: { list: async () => (await http.get('/audit-logs')).data },
+  audit: { list: async (params: any = {}) => (await http.get('/audit-logs', { params })).data },
   templates: {
     list: async () => (await http.get('/import-templates')).data,
     create: async (payload: any) => (await http.post('/import-templates', payload)).data,

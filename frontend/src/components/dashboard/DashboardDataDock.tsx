@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { memo, useDeferredValue, useEffect, useMemo, useState } from 'react';
 import type { DragEvent } from 'react';
 import { Database, GripVertical, Plus, Search } from 'lucide-react';
 
@@ -54,19 +54,20 @@ function fieldPayload(column: any): DashboardFieldDragPayload {
   };
 }
 
-export function DashboardDataDock({ dataset, draggable = false, onFieldDragStart, onFieldDragEnd }: Props) {
+export const DashboardDataDock = memo(function DashboardDataDock({ dataset, draggable = false, onFieldDragStart, onFieldDragEnd }: Props) {
   const [open, setOpen] = useState(() => {
     if (typeof window === 'undefined') return true;
     return window.localStorage.getItem('easybi-dashboard-data-dock') !== 'closed';
   });
   const [search, setSearch] = useState('');
+  const deferredSearch = useDeferredValue(search);
 
   useEffect(() => {
     window.localStorage.setItem('easybi-dashboard-data-dock', open ? 'open' : 'closed');
   }, [open]);
 
   const columns = useMemo(() => {
-    const term = search.trim().toLowerCase();
+    const term = deferredSearch.trim().toLowerCase();
     const allColumns = Array.isArray(dataset?.columns) ? dataset.columns : [];
     if (!term) return allColumns;
     return allColumns.filter((column: any) => [
@@ -75,7 +76,7 @@ export function DashboardDataDock({ dataset, draggable = false, onFieldDragStart
       column?.semanticType,
       column?.dataType
     ].filter(Boolean).join(' ').toLowerCase().includes(term));
-  }, [dataset?.columns, search]);
+  }, [dataset?.columns, deferredSearch]);
 
   const calculatedColumns = columns.filter((column: any) => isCalculatedColumn(column));
   const sourceColumns = columns.filter((column: any) => !isCalculatedColumn(column));
@@ -169,4 +170,4 @@ export function DashboardDataDock({ dataset, draggable = false, onFieldDragStart
       )}
     </aside>
   );
-}
+});

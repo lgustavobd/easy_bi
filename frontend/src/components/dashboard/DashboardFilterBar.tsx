@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useDeferredValue, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Check, Filter, ListChecks, Plus, Search, SlidersHorizontal, Trash2, X } from 'lucide-react';
 import { api } from '../../api/resources.api';
@@ -154,6 +154,7 @@ function FilterEditor({
   panel?: boolean;
 }) {
   const [search, setSearch] = useState('');
+  const deferredSearch = useDeferredValue(search);
   const columns = filterableColumns(dataset);
   const selectedColumn = columns.find((column: any) => column.name === filter.dimension) || columns[0];
   const availableOperators = operatorsForColumn(selectedColumn);
@@ -170,16 +171,16 @@ function FilterEditor({
   const isNumberInputOperator = ['equals', 'notEquals', 'gte', 'lte'].includes(operator) && isNumber && !isDate;
 
   const { data, isFetching } = useQuery({
-    queryKey: ['filter-options', dataset?.id, filter.dimension, search, JSON.stringify(allFilters), operator],
+    queryKey: ['filter-options', dataset?.id, filter.dimension, deferredSearch, JSON.stringify(allFilters), operator],
     queryFn: () => api.dashboards.filterOptions({
       datasetId: dataset.id,
       column: filter.dimension,
-      search,
+      search: deferredSearch,
       filters: allFilters,
       limit: 250
     }),
     enabled: Boolean(dataset?.id && filter.dimension && isSelectOperator),
-    staleTime: 10_000
+    staleTime: 60_000
   });
 
   const options = data?.options || [];

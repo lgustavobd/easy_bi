@@ -114,6 +114,12 @@ export class DashboardDataPreviewDto {
   limit?: number;
 }
 
+export class DashboardDataPreviewBatchDto {
+  @IsOptional()
+  @IsArray()
+  items?: DashboardDataPreviewDto[];
+}
+
 export class FilterOptionsDto {
   @IsString()
   datasetId: string;

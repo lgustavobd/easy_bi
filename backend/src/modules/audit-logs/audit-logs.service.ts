@@ -4,12 +4,12 @@ import { PrismaService } from '../../database/prisma.service';
 export class AuditLogsService {
   constructor(private prisma: PrismaService) {}
   register(input: any) { return this.prisma.auditLog.create({ data: input }); }
-  list(organizationId?: string) {
+  list(organizationId?: string, limit = 150) {
     return this.prisma.auditLog.findMany({
       where: organizationId ? { organizationId } : {},
       include: { user: { select: { id: true, name: true, email: true } } },
       orderBy: { createdAt: 'desc' },
-      take: 150
+      take: Math.min(Math.max(Number(limit || 150), 1), 150)
     });
   }
 }

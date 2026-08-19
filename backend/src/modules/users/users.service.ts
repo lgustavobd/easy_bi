@@ -57,7 +57,22 @@ export class UsersService {
     return this.get(user.id, actor, targetOrgId);
   }
 
-  list(actor: any, organizationId?: string) {
+  list(actor: any, organizationId?: string, options: { summary?: boolean } = {}) {
+    if (options.summary) {
+      if (actor.isSuperAdmin && !organizationId) {
+        return this.prisma.user.findMany({
+          where: { deletedAt: null },
+          select: { id: true, status: true, isSuperAdmin: true, createdAt: true, updatedAt: true },
+          orderBy: { createdAt: 'desc' }
+        });
+      }
+      if (!organizationId) throw new ForbiddenException('Organizacao nao informada.');
+      return this.prisma.user.findMany({
+        where: { organizations: { some: { organizationId, status: 'ACTIVE' } }, deletedAt: null },
+        select: { id: true, status: true, isSuperAdmin: true, createdAt: true, updatedAt: true },
+        orderBy: { createdAt: 'desc' }
+      });
+    }
     if (actor.isSuperAdmin && !organizationId) {
       return this.prisma.user.findMany({
         where: { deletedAt: null },

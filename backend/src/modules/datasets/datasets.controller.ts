@@ -69,8 +69,8 @@ export class DatasetsController {
 
   @Get()
   @Permissions('dashboard.view')
-  list(@CurrentOrganization() org: string, @CurrentUser() user: any, @Query('sectorId') sectorId?: string) {
-    return this.service.list(org, user, sectorId);
+  list(@CurrentOrganization() org: string, @CurrentUser() user: any, @Query('sectorId') sectorId?: string, @Query('summary') summary?: string) {
+    return this.service.list(org, user, sectorId, { summary: summary === 'true' });
   }
 
   @Get(':id')

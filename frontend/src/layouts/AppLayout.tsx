@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { createPortal } from 'react-dom';
@@ -47,6 +47,11 @@ export function AppLayout() {
   const location = useLocation();
   const queryClient = useQueryClient();
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const scrollTimeoutRef = useRef<number | null>(null);
+  const scrollingRef = useRef(false);
+  const pageRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLElement | null>(null);
+  const previousOrganizationIdRef = useRef<string | null | undefined>(undefined);
   const accent = accentOf(organization);
   const isGlobalAdmin = Boolean(user?.isSuperAdmin);
   const visibleMenu = useMemo(() => menu.filter(item => hasPermission(item.permission, user, organization)), [user, organization]);
@@ -57,14 +62,14 @@ export function AppLayout() {
     queryKey: unreadKey,
     queryFn: api.notifications.unreadCount,
     enabled: Boolean(user),
-    refetchInterval: 30000,
+    refetchInterval: 5 * 60 * 1000,
     retry: false
   });
   const { data: notifications = [] } = useQuery({
     queryKey: notificationsKey,
     queryFn: api.notifications.list,
     enabled: Boolean(user) && notificationsOpen,
-    refetchInterval: notificationsOpen ? 30000 : false,
+    refetchInterval: notificationsOpen ? 2 * 60 * 1000 : false,
     retry: false
   });
   const refreshNotifications = () => {
@@ -86,11 +91,52 @@ export function AppLayout() {
   }, [accent]);
 
   useEffect(() => {
+    if (previousOrganizationIdRef.current === undefined) {
+      previousOrganizationIdRef.current = organization?.id || null;
+      return;
+    }
+    if (previousOrganizationIdRef.current === (organization?.id || null)) return;
+    previousOrganizationIdRef.current = organization?.id || null;
+    queryClient.invalidateQueries({ queryKey: ['home-summary'] });
+    queryClient.invalidateQueries({ queryKey: ['dashboards'] });
+    queryClient.invalidateQueries({ queryKey: ['datasets'] });
+    queryClient.invalidateQueries({ queryKey: ['users'] });
+    queryClient.invalidateQueries({ queryKey: ['audit-logs'] });
+    queryClient.invalidateQueries({ queryKey: ['import-templates'] });
+    queryClient.invalidateQueries({ queryKey: ['sectors'] });
+  }, [organization?.id, queryClient]);
+
+  useEffect(() => {
     if (!isGlobalAdmin) return;
     if (organization?.id) setOrganization(GLOBAL_ADMIN_ORGANIZATION);
     const tenantDataRoute = location.pathname === '/' || location.pathname.startsWith('/dashboards') || location.pathname.startsWith('/datasets') || location.pathname.startsWith('/templates') || location.pathname.startsWith('/appearance') || location.pathname.startsWith('/audit');
     if (tenantDataRoute) navigate('/admin-dashboard', { replace: true });
   }, [isGlobalAdmin, location.pathname, navigate, organization?.id, setOrganization]);
+
+  useEffect(() => {
+    return () => {
+      if (scrollTimeoutRef.current) window.clearTimeout(scrollTimeoutRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    const node = contentRef.current;
+    if (!node) return;
+    function markScrolling() {
+      if (!scrollingRef.current) {
+        scrollingRef.current = true;
+        pageRef.current?.classList.add('is-scrolling');
+      }
+      if (scrollTimeoutRef.current) window.clearTimeout(scrollTimeoutRef.current);
+      scrollTimeoutRef.current = window.setTimeout(() => {
+        scrollingRef.current = false;
+        pageRef.current?.classList.remove('is-scrolling');
+        scrollTimeoutRef.current = null;
+      }, 140);
+    }
+    node.addEventListener('scroll', markScrolling, { passive: true });
+    return () => node.removeEventListener('scroll', markScrolling);
+  }, []);
 
   function goToStart() {
     navigate(isGlobalAdmin ? '/admin-dashboard' : '/');
@@ -167,7 +213,7 @@ export function AppLayout() {
   }
 
   return (
-    <div className="app-layout-page app-layout-page-topnav">
+    <div ref={pageRef} className="app-layout-page app-layout-page-topnav">
       <div className="app-layout-frame app-layout-frame-topnav">
         <main className="app-main">
           <header className="app-header app-header-topnav">
@@ -198,7 +244,7 @@ export function AppLayout() {
               <button onClick={() => { logout(); navigate('/login'); }} className="app-logout-button app-top-logout-button" aria-label="Sair" title="Sair"><LogOut size={18} /></button>
             </div>
           </header>
-          <section className="app-content"><Outlet /></section>
+          <section ref={contentRef} className="app-content"><Outlet /></section>
         </main>
       </div>
     </div>

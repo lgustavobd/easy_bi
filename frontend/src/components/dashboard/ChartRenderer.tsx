@@ -1,3 +1,4 @@
+import { memo, useEffect, useRef, useState } from 'react';
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, ComposedChart, Funnel, FunnelChart, LabelList, Legend, Line, LineChart, Pie, PieChart, PolarAngleAxis, PolarGrid, PolarRadiusAxis, Radar, RadarChart, ResponsiveContainer, Tooltip, Treemap, XAxis, YAxis } from 'recharts';
 
 export type FilterRule = {
@@ -232,6 +233,36 @@ function EmptyState({ message }: { message: string }) {
   );
 }
 
+export const LazyChartRenderer = memo(function LazyChartRenderer(props: ChartRendererProps) {
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const [shouldRender, setShouldRender] = useState(false);
+
+  useEffect(() => {
+    const element = wrapperRef.current;
+    if (!element || shouldRender) return;
+    if (typeof window === 'undefined' || !('IntersectionObserver' in window)) {
+      setShouldRender(true);
+      return;
+    }
+
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        setShouldRender(true);
+        observer.disconnect();
+      }
+    }, { rootMargin: '360px 0px' });
+
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [shouldRender]);
+
+  return (
+    <div ref={wrapperRef} className="h-full">
+      {shouldRender ? <ChartRenderer {...props} /> : <Skeleton />}
+    </div>
+  );
+});
+
 function TreemapContent(props: any) {
   const { x, y, width, height, name, value, index } = props;
   const fill = palette[Math.abs(Number(index || 0)) % palette.length];
@@ -251,7 +282,7 @@ function TreemapContent(props: any) {
   );
 }
 
-export function ChartRenderer({ type, metric, secondaryMetric, dimension, showLegend = true, formatConfig, secondaryFormatConfig, tableColumnFormats, data, loading, emptyMessage }: ChartRendererProps) {
+export const ChartRenderer = memo(function ChartRenderer({ type, metric, secondaryMetric, dimension, showLegend = true, formatConfig, secondaryFormatConfig, tableColumnFormats, data, loading, emptyMessage }: ChartRendererProps) {
   if (loading) return <Skeleton />;
 
   const rows = data?.rows || [];
@@ -289,7 +320,7 @@ export function ChartRenderer({ type, metric, secondaryMetric, dimension, showLe
           <YAxis tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={(value) => formatAxisTick(metric, value, valueFormatConfig)} />
           <Tooltip formatter={(value: number) => formatValue(metric, value, valueFormatConfig)} labelFormatter={(value) => `${dimensionLabel}: ${value}`} />
           {showLegend && <Legend verticalAlign="bottom" height={26} />}
-          <Line name={metricLabel} type="monotone" dataKey="value" stroke="var(--easy-primary)" strokeWidth={3} dot={{ r: 3 }} />
+          <Line name={metricLabel} type="monotone" dataKey="value" stroke="var(--easy-primary)" strokeWidth={3} dot={{ r: 3 }} isAnimationActive={false} />
         </LineChart>
       </ResponsiveContainer>
     );
@@ -310,7 +341,7 @@ export function ChartRenderer({ type, metric, secondaryMetric, dimension, showLe
           <YAxis tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={(value) => formatAxisTick(metric, value, valueFormatConfig)} />
           <Tooltip formatter={(value: number) => formatValue(metric, value, valueFormatConfig)} labelFormatter={(value) => `${dimensionLabel}: ${value}`} />
           {showLegend && <Legend verticalAlign="bottom" height={26} />}
-          <Area name={metricLabel} type="monotone" dataKey="value" stroke="var(--easy-primary)" strokeWidth={3} fill="url(#easyAreaFill)" />
+          <Area name={metricLabel} type="monotone" dataKey="value" stroke="var(--easy-primary)" strokeWidth={3} fill="url(#easyAreaFill)" isAnimationActive={false} />
         </AreaChart>
       </ResponsiveContainer>
     );
@@ -332,8 +363,8 @@ export function ChartRenderer({ type, metric, secondaryMetric, dimension, showLe
             labelFormatter={(value) => `${dimensionLabel}: ${value}`}
           />
           {showLegend && <Legend verticalAlign="bottom" height={26} />}
-          <Bar yAxisId="left" name={metricLabel} dataKey="value" fill="var(--easy-primary-2)" fillOpacity={0.48} radius={[8, 8, 0, 0]} />
-          <Line yAxisId={hasSecondaryValues ? 'right' : 'left'} name={hasSecondaryValues ? secondaryMetricLabel : `${metricLabel} em linha`} type="monotone" dataKey={hasSecondaryValues ? 'secondaryValue' : 'value'} stroke="var(--easy-primary)" strokeWidth={3} dot={{ r: 3 }} />
+          <Bar yAxisId="left" name={metricLabel} dataKey="value" fill="var(--easy-primary-2)" fillOpacity={0.48} radius={[8, 8, 0, 0]} isAnimationActive={false} />
+          <Line yAxisId={hasSecondaryValues ? 'right' : 'left'} name={hasSecondaryValues ? secondaryMetricLabel : `${metricLabel} em linha`} type="monotone" dataKey={hasSecondaryValues ? 'secondaryValue' : 'value'} stroke="var(--easy-primary)" strokeWidth={3} dot={{ r: 3 }} isAnimationActive={false} />
         </ComposedChart>
       </ResponsiveContainer>
     );
@@ -345,7 +376,7 @@ export function ChartRenderer({ type, metric, secondaryMetric, dimension, showLe
         <PieChart>
           <Tooltip formatter={(value: number) => formatValue(metric, value, valueFormatConfig)} />
           {showLegend && <Legend verticalAlign="bottom" height={32} />}
-          <Pie data={rows} dataKey="value" nameKey="name" innerRadius={type === 'PIE_CHART' ? 0 : '50%'} outerRadius="76%" paddingAngle={2}>
+          <Pie data={rows} dataKey="value" nameKey="name" innerRadius={type === 'PIE_CHART' ? 0 : '50%'} outerRadius="76%" paddingAngle={2} isAnimationActive={false}>
             {rows.map((_, index) => <Cell key={index} fill={palette[index % palette.length]} />)}
           </Pie>
         </PieChart>
@@ -362,7 +393,7 @@ export function ChartRenderer({ type, metric, secondaryMetric, dimension, showLe
           <PolarRadiusAxis tick={{ fontSize: 10, fill: '#94a3b8' }} tickFormatter={(value) => formatAxisTick(metric, value, valueFormatConfig)} />
           <Tooltip formatter={(value: number) => formatValue(metric, value, valueFormatConfig)} />
           {showLegend && <Legend verticalAlign="bottom" height={26} />}
-          <Radar name={metricLabel} dataKey="value" stroke="var(--easy-primary)" fill="var(--easy-primary)" fillOpacity={0.22} strokeWidth={3} />
+          <Radar name={metricLabel} dataKey="value" stroke="var(--easy-primary)" fill="var(--easy-primary)" fillOpacity={0.22} strokeWidth={3} isAnimationActive={false} />
         </RadarChart>
       </ResponsiveContainer>
     );
@@ -373,7 +404,7 @@ export function ChartRenderer({ type, metric, secondaryMetric, dimension, showLe
       <ResponsiveContainer width="100%" height="100%">
         <FunnelChart margin={{ top: 12, right: 22, bottom: 12, left: 22 }}>
           <Tooltip formatter={(value: number) => formatValue(metric, value, valueFormatConfig)} />
-          <Funnel data={compositionRows.slice(0, 10)} dataKey="value" nameKey="name" isAnimationActive>
+          <Funnel data={compositionRows.slice(0, 10)} dataKey="value" nameKey="name" isAnimationActive={false}>
             <LabelList position="right" fill="#334155" stroke="none" dataKey="name" fontSize={11} fontWeight={800} />
             {compositionRows.slice(0, 10).map((_, index) => <Cell key={index} fill={palette[index % palette.length]} />)}
           </Funnel>
@@ -385,7 +416,7 @@ export function ChartRenderer({ type, metric, secondaryMetric, dimension, showLe
   if (type === 'TREEMAP_CHART') {
     return (
       <ResponsiveContainer width="100%" height="100%">
-        <Treemap data={compositionRows} dataKey="value" nameKey="name" stroke="transparent" content={<TreemapContent />}>
+        <Treemap data={compositionRows} dataKey="value" nameKey="name" stroke="transparent" content={<TreemapContent />} isAnimationActive={false}>
           <Tooltip formatter={(value: number) => formatValue(metric, value, valueFormatConfig)} />
         </Treemap>
       </ResponsiveContainer>
@@ -446,7 +477,7 @@ export function ChartRenderer({ type, metric, secondaryMetric, dimension, showLe
           <YAxis type="category" dataKey="name" width={90} tick={{ fontSize: 11, fill: '#64748b' }} />
           <Tooltip formatter={(value: number) => formatValue(metric, value, valueFormatConfig)} labelFormatter={(value) => `${dimensionLabel}: ${value}`} />
           {showLegend && <Legend verticalAlign="bottom" height={26} />}
-          <Bar name={metricLabel} dataKey="value" fill="var(--easy-primary)" radius={[0, 8, 8, 0]} />
+          <Bar name={metricLabel} dataKey="value" fill="var(--easy-primary)" radius={[0, 8, 8, 0]} isAnimationActive={false} />
         </BarChart>
       </ResponsiveContainer>
     );
@@ -460,8 +491,8 @@ export function ChartRenderer({ type, metric, secondaryMetric, dimension, showLe
         <YAxis tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={(value) => formatAxisTick(metric, value, valueFormatConfig)} />
         <Tooltip formatter={(value: number) => formatValue(metric, value, valueFormatConfig)} labelFormatter={(value) => `${dimensionLabel}: ${value}`} />
         {showLegend && <Legend verticalAlign="bottom" height={26} />}
-        <Bar name={metricLabel} dataKey="value" fill="var(--easy-primary)" radius={[8, 8, 0, 0]} />
+        <Bar name={metricLabel} dataKey="value" fill="var(--easy-primary)" radius={[8, 8, 0, 0]} isAnimationActive={false} />
       </BarChart>
     </ResponsiveContainer>
   );
-}
+});

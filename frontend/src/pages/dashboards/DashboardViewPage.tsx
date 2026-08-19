@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 import GridLayout, { WidthProvider } from 'react-grid-layout';
@@ -7,9 +7,8 @@ import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
 import { ArrowLeft, Download, Edit3, Loader2, Maximize2, Minimize2 } from 'lucide-react';
 import { api } from '../../api/resources.api';
-import { ChartRenderer, FilterRule } from '../../components/dashboard/ChartRenderer';
+import { FilterRule, LazyChartRenderer } from '../../components/dashboard/ChartRenderer';
 import { DashboardFilterDock } from '../../components/dashboard/DashboardFilterDock';
-import { exportDashboardAsHtml } from '../../components/dashboard/export-widget';
 import { useAuthStore } from '../../store/auth.store';
 import { planFeature } from '../../utils/plan';
 
@@ -95,36 +94,47 @@ function normalizeWidget(widget: any, dataset: any) {
   };
 }
 
-function WidgetView({ widget, dataset, filters }: { widget: any; dataset: any; filters: FilterRule[] }) {
+function widgetPreviewPayload(widget: any, filters: FilterRule[], metricColumn = widget.metricColumn) {
+  return {
+    datasetId: widget.datasetId,
+    metricColumn,
+    dimensionColumn: widget.type === 'KPI' ? undefined : widget.dimensionColumn,
+    tableColumns: widget.type === 'TABLE' ? (widget.tableColumns?.length ? widget.tableColumns : [widget.dimensionColumn, widget.metricColumn].filter(Boolean)) : undefined,
+    aggregation: widget.aggregation,
+    filters,
+    limit: widget.type === 'TABLE' ? 100 : 40
+  };
+}
+
+function buildWidgetPreviewRequests(widgets: any[], filters: FilterRule[]) {
+  return widgets.flatMap((widget) => {
+    const requests = [{ widgetId: widget.id, part: 'primary', payload: widgetPreviewPayload(widget, filters) }];
+    if (isComboVisual(widget) && widget.secondaryMetricColumn && widget.secondaryMetricColumn !== widget.metricColumn) {
+      requests.push({ widgetId: widget.id, part: 'secondary', payload: widgetPreviewPayload(widget, filters, widget.secondaryMetricColumn) });
+    }
+    return requests;
+  });
+}
+
+function buildWidgetDataMap(widgets: any[], requests: ReturnType<typeof buildWidgetPreviewRequests>, results: any[]) {
+  const byRequest = new Map<string, any>();
+  requests.forEach((request, index) => byRequest.set(`${request.widgetId}:${request.part}`, results[index]));
+  const byWidget = new Map<string, any>();
+  widgets.forEach((widget) => {
+    const primaryData = byRequest.get(`${widget.id}:primary`);
+    const secondaryData = widget.secondaryMetricColumn === widget.metricColumn
+      ? primaryData
+      : byRequest.get(`${widget.id}:secondary`);
+    byWidget.set(widget.id, isComboVisual(widget) && secondaryData ? mergeComboData(primaryData, secondaryData) : primaryData);
+  });
+  return byWidget;
+}
+
+const WidgetView = memo(function WidgetView({ widget, data, loading }: { widget: any; dataset: any; data: any; loading: boolean }) {
   const cardRef = useRef<HTMLElement | null>(null);
   const visualType = widget.visualType || widget.type;
-  const { data, isFetching } = useQuery({
-    queryKey: ['dashboard-view-widget', widget.id, widget.datasetId, widget.metricColumn, widget.secondaryMetricColumn, widget.dimensionColumn, JSON.stringify(widget.tableColumns || []), widget.aggregation, widget.type, visualType, JSON.stringify(filters)],
-    queryFn: async () => {
-      const primaryData = await api.dashboards.previewData({
-        datasetId: widget.datasetId,
-        metricColumn: widget.metricColumn,
-        dimensionColumn: widget.type === 'KPI' ? undefined : widget.dimensionColumn,
-        tableColumns: widget.type === 'TABLE' ? (widget.tableColumns?.length ? widget.tableColumns : [widget.dimensionColumn, widget.metricColumn].filter(Boolean)) : undefined,
-        aggregation: widget.aggregation,
-        filters,
-        limit: widget.type === 'TABLE' ? 100 : 40
-      });
-      if (!isComboVisual(widget) || !widget.secondaryMetricColumn) return primaryData;
-      if (widget.secondaryMetricColumn === widget.metricColumn) return mergeComboData(primaryData, primaryData);
-      const secondaryData = await api.dashboards.previewData({
-        datasetId: widget.datasetId,
-        metricColumn: widget.secondaryMetricColumn,
-        dimensionColumn: widget.dimensionColumn,
-        aggregation: widget.aggregation,
-        filters,
-        limit: 40
-      });
-      return mergeComboData(primaryData, secondaryData);
-    },
-    enabled: Boolean(widget.datasetId),
-    staleTime: 5_000
-  });
+  const valueFormatConfig = useMemo(() => ({ type: widget.valueFormat, prefix: widget.valuePrefix, suffix: widget.valueSuffix, decimals: widget.valueDecimals }), [widget.valueFormat, widget.valuePrefix, widget.valueSuffix, widget.valueDecimals]);
+  const secondaryValueFormatConfig = useMemo(() => ({ type: widget.secondaryValueFormat, prefix: widget.secondaryValuePrefix, suffix: widget.secondaryValueSuffix, decimals: widget.secondaryValueDecimals }), [widget.secondaryValueFormat, widget.secondaryValuePrefix, widget.secondaryValueSuffix, widget.secondaryValueDecimals]);
 
   return (
     <article ref={cardRef} className="dashboard-widget-view h-full">
@@ -135,15 +145,26 @@ function WidgetView({ widget, dataset, filters }: { widget: any; dataset: any; f
         </div>
       </div>
       <div className="h-[calc(100%-54px)] p-4">
-        <ChartRenderer type={visualType} metric={widget.metricColumn} secondaryMetric={widget.secondaryMetricColumn} dimension={widget.dimensionColumn} showLegend={widget.showLegend} formatConfig={{ type: widget.valueFormat, prefix: widget.valuePrefix, suffix: widget.valueSuffix, decimals: widget.valueDecimals }} secondaryFormatConfig={{ type: widget.secondaryValueFormat, prefix: widget.secondaryValuePrefix, suffix: widget.secondaryValueSuffix, decimals: widget.secondaryValueDecimals }} tableColumnFormats={widget.tableColumnFormats} data={data} loading={isFetching} />
+        <LazyChartRenderer type={visualType} metric={widget.metricColumn} secondaryMetric={widget.secondaryMetricColumn} dimension={widget.dimensionColumn} showLegend={widget.showLegend} formatConfig={valueFormatConfig} secondaryFormatConfig={secondaryValueFormatConfig} tableColumnFormats={widget.tableColumnFormats} data={data} loading={loading} />
       </div>
     </article>
   );
-}
+}, (previous, next) => previous.widget === next.widget && previous.data === next.data && previous.loading === next.loading);
 
 function canEditDashboard(user: any, organization: any) {
   const role = String(organization?.role || '').toUpperCase();
   return Boolean(user?.isSuperAdmin || role === 'SUPER_ADMIN' || role === 'ORG_ADMIN' || role === 'EDITOR');
+}
+
+function useDebouncedValue<T>(value: T, delay = 320) {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => setDebouncedValue(value), delay);
+    return () => window.clearTimeout(timeoutId);
+  }, [value, delay]);
+
+  return debouncedValue;
 }
 
 export function DashboardViewPage() {
@@ -154,14 +175,38 @@ export function DashboardViewPage() {
   const exportRef = useRef<HTMLElement | null>(null);
   const [filters, setFilters] = useState<FilterRule[]>([]);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const { data: datasets = [], isLoading: loadingDatasets } = useQuery({ queryKey: ['datasets'], queryFn: api.datasets.list });
   const { data: dashboard, isLoading: loadingDashboard } = useQuery({ queryKey: ['dashboard', id], queryFn: () => api.dashboards.get(id), enabled: Boolean(id) });
 
   const datasetId = (dashboard?.layoutConfig as any)?.datasetId || dashboard?.widgets?.[0]?.datasetId;
-  const dataset = datasets.find((item: any) => item.id === datasetId) || datasets[0];
-  const widgets = useMemo(() => (dashboard?.widgets || []).map((widget: any) => normalizeWidget(widget, dataset)), [dashboard, dataset]);
+  const dataset = useMemo(() => {
+    const dashboardWidgets = Array.isArray(dashboard?.widgets) ? dashboard.widgets : [];
+    return dashboardWidgets.find((widget: any) => widget.datasetId === datasetId)?.dataset || dashboardWidgets[0]?.dataset;
+  }, [dashboard?.widgets, datasetId]);
+  const widgets = useMemo(() => (dashboard?.widgets || []).map((widget: any) => normalizeWidget(widget, dataset)), [dashboard?.widgets, dataset]);
   const layout: Layout[] = useMemo(() => widgets.map((widget: any) => ({ i: widget.id, x: widget.x, y: widget.y, w: widget.w, h: widget.h, static: true })), [widgets]);
-  const datasetFilters = filters.filter((filter) => dataset?.id && (!filter.datasetId || filter.datasetId === dataset.id));
+  const datasetFilters = useMemo(
+    () => filters.filter((filter) => dataset?.id && (!filter.datasetId || filter.datasetId === dataset.id)),
+    [filters, dataset?.id]
+  );
+  const debouncedDatasetFilters = useDebouncedValue(datasetFilters);
+  const previewRequests = useMemo(
+    () => buildWidgetPreviewRequests(widgets, debouncedDatasetFilters),
+    [widgets, debouncedDatasetFilters]
+  );
+  const previewRequestKey = useMemo(
+    () => JSON.stringify(previewRequests.map((request) => request.payload)),
+    [previewRequests]
+  );
+  const { data: previewBatch, isFetching: loadingPreviewBatch } = useQuery({
+    queryKey: ['dashboard-view-data-batch', dashboard?.id, previewRequestKey],
+    queryFn: () => api.dashboards.previewDataBatch({ items: previewRequests.map((request) => request.payload) }),
+    enabled: Boolean(widgets.length && previewRequests.length),
+    staleTime: 45_000
+  });
+  const widgetDataById = useMemo(
+    () => buildWidgetDataMap(widgets, previewRequests, previewBatch?.results || []),
+    [widgets, previewRequests, previewBatch?.results]
+  );
   const canExportDashboard = planFeature(organization, 'canExportCharts');
 
   useEffect(() => {
@@ -196,8 +241,9 @@ export function DashboardViewPage() {
     if (request) await request.call(target);
   }
 
-  function exportDashboard() {
+  async function exportDashboard() {
     if (!canExportDashboard || !widgets.length) return;
+    const { exportDashboardAsHtml } = await import('../../components/dashboard/export-widget');
     exportDashboardAsHtml(
       exportRef.current,
       { name: dashboard?.name, description: dashboard?.description },
@@ -207,7 +253,7 @@ export function DashboardViewPage() {
     );
   }
 
-  if (loadingDatasets || loadingDashboard) {
+  if (loadingDashboard) {
     return <div className="card-premium flex items-center gap-3 p-6 text-sm font-bold text-slate-500"><Loader2 className="animate-spin" size={18} /> Carregando dashboard...</div>;
   }
 
@@ -240,7 +286,7 @@ export function DashboardViewPage() {
           <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-8 text-center text-sm font-bold text-slate-500">Esse dashboard ainda não possui gráficos salvos.</div>
         ) : (
           <ResponsiveGridLayout className="layout" cols={12} rowHeight={36} margin={[16, 16]} containerPadding={[0, 0]} layout={layout} compactType={null} preventCollision isDraggable={false} isResizable={false}>
-            {widgets.map((widget: any) => <div key={widget.id}><WidgetView widget={widget} dataset={dataset} filters={datasetFilters} /></div>)}
+            {widgets.map((widget: any) => <div key={widget.id}><WidgetView widget={widget} dataset={dataset} data={widgetDataById.get(widget.id)} loading={loadingPreviewBatch} /></div>)}
           </ResponsiveGridLayout>
         )}
           </section>

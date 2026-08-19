@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import { Filter } from 'lucide-react';
 import type { FilterRule } from './ChartRenderer';
 import { DashboardFilterBar } from './DashboardFilterBar';
@@ -10,7 +10,7 @@ type Props = {
   readOnly?: boolean;
 };
 
-export function DashboardFilterDock({ dataset, filters, onChange, readOnly }: Props) {
+export const DashboardFilterDock = memo(function DashboardFilterDock({ dataset, filters, onChange, readOnly }: Props) {
   const [open, setOpen] = useState(() => {
     if (typeof window === 'undefined') return true;
     return window.localStorage.getItem('easybi-dashboard-filter-dock') !== 'closed';
@@ -46,4 +46,4 @@ export function DashboardFilterDock({ dataset, filters, onChange, readOnly }: Pr
       )}
     </aside>
   );
-}
+});

@@ -5,7 +5,7 @@ import { Permissions } from '../../common/decorators/permissions.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionGuard } from '../../common/guards/permission.guard';
 import { TenantGuard } from '../../common/guards/tenant.guard';
-import { CreateDashboardDto, DashboardDataPreviewDto, FilterOptionsDto, UpdateDashboardDto, WidgetDto } from './dto';
+import { CreateDashboardDto, DashboardDataPreviewBatchDto, DashboardDataPreviewDto, FilterOptionsDto, UpdateDashboardDto, WidgetDto } from './dto';
 import { DashboardsService } from './dashboards.service';
 
 @UseGuards(JwtAuthGuard, TenantGuard, PermissionGuard)
@@ -21,14 +21,20 @@ export class DashboardsController {
 
   @Get()
   @Permissions('dashboard.view')
-  list(@CurrentOrganization() org: string, @CurrentUser() user: any) {
-    return this.service.list(org, user);
+  list(@CurrentOrganization() org: string, @CurrentUser() user: any, @Query('summary') summary?: string) {
+    return this.service.list(org, user, summary === 'true');
   }
 
   @Post('data-preview')
   @Permissions('dashboard.view')
   previewData(@Body() dto: DashboardDataPreviewDto, @CurrentOrganization() org: string, @CurrentUser() user: any) {
     return this.service.previewData(dto, org, user);
+  }
+
+  @Post('data-preview-batch')
+  @Permissions('dashboard.view')
+  previewDataBatch(@Body() dto: DashboardDataPreviewBatchDto, @CurrentOrganization() org: string, @CurrentUser() user: any) {
+    return this.service.previewDataBatch(dto, org, user);
   }
 
   @Post('filter-options')

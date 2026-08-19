@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { api } from '../api/resources.api';
 import { PageHero } from '../components/ui/PageHero';
+import { useAuthStore } from '../store/auth.store';
 
 async function safe<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
   try {
@@ -83,14 +84,15 @@ function ProgressInsight({ label, value, detail }: { label: string; value: numbe
 }
 
 export function HomePage() {
+  const organization = useAuthStore(s => s.organization);
   const { data, isLoading } = useQuery({
-    queryKey: ['home-summary'],
+    queryKey: ['home-summary', organization?.id || 'global'],
     queryFn: async () => {
       const [dashboards, datasets, users, auditLogs] = await Promise.all([
-        safe(() => api.dashboards.list(), []),
-        safe(() => api.datasets.list(), []),
-        safe(() => api.users.list(), []),
-        safe(() => api.audit.list(), [])
+        safe(() => api.dashboards.list({ summary: true }), []),
+        safe(() => api.datasets.list({ summary: true }), []),
+        safe(() => api.users.list({ summary: true }), []),
+        safe(() => api.audit.list({ limit: 20 }), [])
       ]);
       return { dashboards, datasets, users, auditLogs };
     }
